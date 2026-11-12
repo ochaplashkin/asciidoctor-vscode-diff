@@ -1,5 +1,6 @@
 out/
 node_modules/
+*.vsix
 .asciidoctor/
 test/samples/*.pdf
 media/*.js
