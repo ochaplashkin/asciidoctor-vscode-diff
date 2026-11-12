@@ -247,7 +247,12 @@ ${text}`
       ) as unknown as boolean // incorrect type definition in Asciidoctor.js
       const titlePageLogo = document?.getAttribute('titlePageLogo')
       const coverFilePath = showTitlePage
-        ? createCoverFile(titlePageLogo, baseDirectory, document)
+        ? createCoverFile(
+            titlePageLogo,
+            baseDirectory,
+            document,
+            this.context.extensionUri,
+          )
         : undefined
       if (coverFilePath) {
         objectArgs.push('cover', coverFilePath)
@@ -412,7 +417,7 @@ gem 'asciidoctor-pdf'`,
       if (answer === 'Configure') {
         await vscode.commands.executeCommand(
           'workbench.action.openSettings',
-          '@ext:asciidoctor.asciidoctor-vscode asciidoctorPdfCommand',
+          `@ext:${this.context.extension.id} asciidoctorPdfCommand`,
         )
       } else if (answer === 'Install') {
         await vscode.env.openExternal(
@@ -708,16 +713,13 @@ function createCoverFile(
   titlePageLogo: string,
   baseDir: string,
   document: AsciidoctorDocument,
+  extensionUri: vscode.Uri,
 ) {
-  // Looking up our own extension id always resolves once we're running.
-  const extensionContext = vscode.extensions.getExtension(
-    'asciidoctor.asciidoctor-vscode',
-  )!
   const coverHtmlContent = _generateCoverHtmlContent(
     titlePageLogo,
     baseDir,
     document,
-    extensionContext.extensionUri,
+    extensionUri,
   )
 
   const tmpFilePath = path.join(os.tmpdir(), uuidv4() + '.html')

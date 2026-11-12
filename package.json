@@ -1,9 +1,9 @@
 {
-  "name": "asciidoctor-vscode",
+  "name": "asciidoc-vscode-diff",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "4.3.1-dev",
-  "publisher": "asciidoctor",
+  "version": "4.3.1-diff.1",
+  "publisher": "asciidoc-diff",
   "author": "Guillaume Grossetie <ggrossetie@yuzutech.fr>",
   "contributors": [
     "João Pinto <lamego.pinto@gmail.com>"
@@ -32,7 +32,8 @@
     "Programming Languages"
   ],
   "activationEvents": [
-    "onWebviewPanel:asciidoc.preview"
+    "onWebviewPanel:asciidoc.preview",
+    "onWebviewPanel:asciidoc.diffPreview"
   ],
   "contributes": {
     "languages": [
@@ -170,6 +171,36 @@
         "command": "asciidoc.toggleMonospace",
         "title": "%asciidoc.toggleMonospace.title%",
         "category": "AsciiDoc"
+      },
+      {
+        "command": "asciidoc.compareFiles",
+        "title": "%asciidoc.compareFiles.title%",
+        "category": "AsciiDoc",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "asciidoc.selectForComparison",
+        "title": "%asciidoc.selectForComparison.title%",
+        "category": "AsciiDoc",
+        "icon": "$(selection)"
+      },
+      {
+        "command": "asciidoc.compareWithSelected",
+        "title": "%asciidoc.compareWithSelected.title%",
+        "category": "AsciiDoc",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "asciidoc.clearComparisonSelection",
+        "title": "%asciidoc.clearComparisonSelection.title%",
+        "category": "AsciiDoc",
+        "icon": "$(close)"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "asciidoc.compareSubmenu",
+        "label": "AsciiDoc"
       }
     ],
     "menus": {
@@ -233,6 +264,28 @@
           "command": "asciidoc.showPreview",
           "when": "resourceLangId == asciidoc",
           "group": "navigation"
+        },
+        {
+          "submenu": "asciidoc.compareSubmenu",
+          "when": "resourceLangId == asciidoc",
+          "group": "1_asciidoc_compare"
+        }
+      ],
+      "asciidoc.compareSubmenu": [
+        {
+          "command": "asciidoc.selectForComparison",
+          "when": "resourceLangId == asciidoc",
+          "group": "1_compare@1"
+        },
+        {
+          "command": "asciidoc.compareWithSelected",
+          "when": "resourceLangId == asciidoc && asciidoc.compare.hasSelection",
+          "group": "1_compare@2"
+        },
+        {
+          "command": "asciidoc.clearComparisonSelection",
+          "when": "resourceLangId == asciidoc && asciidoc.compare.hasSelection",
+          "group": "2_clear@1"
         }
       ],
       "editor/title/context": [
@@ -314,6 +367,22 @@
         {
           "command": "asciidoc.toggleMonospace",
           "when": "editorLangId == asciidoc"
+        },
+        {
+          "command": "asciidoc.compareFiles",
+          "when": "editorLangId == asciidoc"
+        },
+        {
+          "command": "asciidoc.selectForComparison",
+          "when": "editorLangId == asciidoc"
+        },
+        {
+          "command": "asciidoc.compareWithSelected",
+          "when": "asciidoc.compare.hasSelection"
+        },
+        {
+          "command": "asciidoc.clearComparisonSelection",
+          "when": "asciidoc.compare.hasSelection"
         }
       ]
     },
@@ -875,10 +944,12 @@
     "@asciidoctor/core": "~4.0",
     "@orcid/bibtex-parse-js": "0.0.25",
     "asciidoctor-kroki": "~2.0",
+    "diff": "^9.0.0",
     "html-entities": "^2.4.0",
     "js-yaml": "^5.2.0",
     "morphdom": "^2.7.8",
     "os-browserify": "^0.3.0",
+    "parse5": "^7.3.0",
     "querystring": "^0.2.1",
     "tty-browserify": "^0.0.1",
     "util": "^0.12.5",

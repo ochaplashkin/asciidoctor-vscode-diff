@@ -1,0 +1,137 @@
+/* Layout of the diff panel. The preview stylesheets are loaded as usual (the
+ * diff document is the webview's active frame), so only the two-pane layout is
+ * defined here. */
+
+body.diff-body {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#diff-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+#diff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  background: var(--vscode-editor-background, #1e1e1e);
+  color: var(--vscode-editor-foreground, #cccccc);
+  font-size: 13px;
+  user-select: none;
+}
+
+.diff-pane-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.diff-pane-title-right {
+  justify-content: flex-end;
+}
+
+.diff-badge {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.diff-badge-old {
+  background: var(
+    --vscode-diffEditor-removedLineBackground,
+    rgba(255, 0, 0, 0.2)
+  );
+}
+
+.diff-badge-new {
+  background: var(
+    --vscode-diffEditor-insertedLineBackground,
+    rgba(0, 128, 0, 0.2)
+  );
+}
+
+.diff-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-status {
+  flex: 0 0 auto;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.diff-swap {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, transparent);
+  color: var(--vscode-button-secondaryForeground, inherit);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.diff-swap:hover {
+  background: var(
+    --vscode-button-secondaryHoverBackground,
+    rgba(128, 128, 128, 0.2)
+  );
+}
+
+.diff-swap-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.diff-status-busy {
+  opacity: 0.7;
+}
+
+.diff-status-error {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.diff-status-clean {
+  color: var(--vscode-diffEditor-insertedTextBackground, rgba(0, 128, 0, 0.8));
+}
+
+#diff-panes {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.diff-pane {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 0 26px;
+  box-sizing: border-box;
+  border-right: 1px solid var(--vscode-panel-border, rgba(128, 128, 128, 0.35));
+  /* Make the pane the containing block for `position: fixed` descendants, so a
+   * `toc: right` (`#toc.toc2`) table of contents stays inside its pane instead of
+   * being pinned to the window. */
+  transform: translateZ(0);
+}
+
+.diff-pane:last-child {
+  border-right: 0;
+}

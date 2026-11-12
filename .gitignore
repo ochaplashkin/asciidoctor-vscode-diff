@@ -18,3 +18,8 @@ media/fonts/**
 coverage/
 build/
 .claude/
+
+# AI SDLC
+ABOUT.md
+PLAN.md
+BUILD.md

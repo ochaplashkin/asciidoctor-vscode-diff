@@ -5,6 +5,7 @@ await esbuild.build({
     index: './preview-src/index.ts',
     pre: './preview-src/pre.ts',
     'highlightjs-init': './preview-src/highlightjs-init.ts',
+    diff: './preview-src/diff.ts',
   },
   bundle: true,
   minify: true,

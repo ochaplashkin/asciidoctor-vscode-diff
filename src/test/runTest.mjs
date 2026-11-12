@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
 import { runTests } from '@vscode/test-electron'
 import { fileURLToPath } from 'url'
@@ -47,11 +48,18 @@ async function main() {
       'test-workspace',
     )
 
+    const packageJson = JSON.parse(
+      readFileSync(path.join(projectRootPath, 'package.json'), 'utf-8'),
+    )
+
     await runTests({
       extensionDevelopmentPath,
       extensionTestsPath,
       launchArgs: [testsWorkspaceDirectoryPath],
-      extensionTestsEnv: parseFilters(process.argv.slice(2)),
+      extensionTestsEnv: {
+        ...parseFilters(process.argv.slice(2)),
+        ASCIIDOC_EXTENSION_ID: `${packageJson.publisher}.${packageJson.name}`,
+      },
     })
   } catch (_err) {
     process.exit(1)

@@ -86,6 +86,10 @@
   "asciidoc.showPreviewSecuritySelector.title": "プレビューセキュリティ設定",
   "asciidoc.showCheatSheet.title": "AsciiDoc チートシートを開く",
   "asciidoc.showSource.title": "ソース表示",
+  "asciidoc.compareFiles.title": "AsciiDoc ファイルを比較",
+  "asciidoc.selectForComparison.title": "比較用に選択",
+  "asciidoc.compareWithSelected.title": "比較",
+  "asciidoc.clearComparisonSelection.title": "比較の選択を解除",
   "asciidoc.toggleBold.title": "太字の切り替え",
   "asciidoc.toggleItalic.title": "斜体の切り替え",
   "asciidoc.toggleMonospace.title": "等幅の切り替え",
@@ -102,5 +106,5 @@
   "asciidoc.wkhtmltopdf_path.deprecationMessage": "本設定は、`#asciidoc.pdf.wkhtmltopdfCommandPath#` + `#asciidoc.pdf.wkhtmltopdfCommandArgs#`に置き換えられ、動作しません。",
   "asciidoc.wkhtmltopdf_path.desc": "**非推奨:** wkhtmltopdfの実行バイナリのフルパスを指定します。",
   "description": "リッチで軽量なマークアップであるAsciiDocをサポートします。",
-  "displayName": "AsciiDoc"
+  "displayName": "AsciiDoc Diff"
 }

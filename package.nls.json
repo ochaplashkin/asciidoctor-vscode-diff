@@ -86,6 +86,10 @@
   "asciidoc.showPreviewSecuritySelector.title": "Manage Preview Security Settings",
   "asciidoc.showCheatSheet.title": "Open AsciiDoc Cheat Sheet",
   "asciidoc.showSource.title": "Show Source",
+  "asciidoc.compareFiles.title": "Compare AsciiDoc Files",
+  "asciidoc.selectForComparison.title": "Select for Comparison",
+  "asciidoc.compareWithSelected.title": "Compare",
+  "asciidoc.clearComparisonSelection.title": "Clear Comparison Selection",
   "asciidoc.toggleBold.title": "Toggle Bold",
   "asciidoc.toggleItalic.title": "Toggle Italic",
   "asciidoc.toggleMonospace.title": "Toggle Monospace",
@@ -102,5 +106,5 @@
   "asciidoc.wkhtmltopdf_path.deprecationMessage": "This setting has been replaced by `#asciidoc.pdf.wkhtmltopdfCommandPath#` + `#asciidoc.pdf.wkhtmltopdfCommandArgs#` and no longer has any effect.",
   "asciidoc.wkhtmltopdf_path.desc": "**Deprecated**: Full path to the `wkhtmltopdf` binary/executable.",
   "description": "Provides rich language support for AsciiDoc.",
-  "displayName": "AsciiDoc"
+  "displayName": "AsciiDoc Diff"
 }

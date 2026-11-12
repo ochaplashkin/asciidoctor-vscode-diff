@@ -1,32 +1,27 @@
-# AsciiDoc support for Visual Studio Code
+# AsciiDoc Diff for VS Code
 
-[![Version](https://vsmarketplacebadges.dev/version-short/asciidoctor.asciidoctor-vscode.svg)](https://marketplace.visualstudio.com/items?itemName=asciidoctor.asciidoctor-vscode)
-[![Installs](https://vsmarketplacebadges.dev/installs-short/asciidoctor.asciidoctor-vscode.svg)](https://marketplace.visualstudio.com/items?itemName=asciidoctor.asciidoctor-vscode)
-[![Ratings](https://vsmarketplacebadges.dev/rating-short/asciidoctor.asciidoctor-vscode.svg)](https://marketplace.visualstudio.com/items?itemName=asciidoctor.asciidoctor-vscode)
-[![Project chat](https://img.shields.io/badge/zulip-join_chat-brightgreen.png)](https://chat.asciidoctor.org/)
+![Maintained by AI](https://img.shields.io/badge/maintained%20by-AI-blueviolet?style=flat-square&logo=openai&logoColor=white)
 
-An extension that provides live preview, syntax highlighting, and snippets for the AsciiDoc format using Asciidoctor.
+Форк расширения [AsciiDoc для Visual Studio Code](https://github.com/asciidoctor/asciidoctor-vscode).
 
-![demo](images/demo.gif)
+Добавляет **сравнение отрендеренного вывода двух AsciiDoc-файлов** в одной
+панели: слева — старый вариант, справа — новый.
 
-## Install
+![demo-diff](images/diff.gif)
 
-Launch Visual Studio Code "Quick Open" (`Ctrl+P`), paste the following command, and press `Enter`:
+## Что добавлено
 
-```
-ext install asciidoctor.asciidoctor-vscode
-```
-
-Alternatively, use the built-in extension browser to find the _AsciiDoc_ extension by _asciidoctor_ and install it.
-
-## Documentation
-
-The full documentation lives at [docs.asciidoctor.org/vscode-extension](https://docs.asciidoctor.org/vscode-extension/).
-
-## Issues
-
-Found a bug or have a question? Please check the [existing issues](https://github.com/asciidoctor/asciidoctor-vscode/issues) first, then open a new one. See [Get help](https://docs.asciidoctor.org/vscode-extension/get-help/) for what to include.
-
-## Contributing
-
-Contributions are welcome. See [Contributing](https://docs.asciidoctor.org/vscode-extension/contributing/) to get started.
+- Сравнение двух файлов по **отрендеренному HTML**, а не по исходному тексту:
+  - пословная подсветка изменений;
+  - подсветка добавленных и удалённых блоков;
+  - подсветка изменений в таблицах (таблица, ячейки, слова).
+- Синхронная прокрутка обеих панелей.
+- Кнопка **Swap** в шапке для смены файлов местами.
+- Выбор файлов через контекстное меню Explorer:
+  - **AsciiDoc → Select for Comparison** — отметить первый файл (рядом появляется
+    значок `⇄`, имя видно в статус-баре);
+  - **AsciiDoc → Compare** — сравнить с отмеченным файлом;
+  - **AsciiDoc → Clear Comparison Selection** — снять выбор.
+- Живое обновление сравнения при редактировании и сохранении файлов.
+- В обеих панелях работают картинки, MathJax, Mermaid, PlantUML и стили из
+  настроек preview.

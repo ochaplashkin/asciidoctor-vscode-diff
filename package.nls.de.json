@@ -86,6 +86,10 @@
   "asciidoc.showPreviewSecuritySelector.title": "Sicherheitseinstellung für Vorschau verwalten",
   "asciidoc.showCheatSheet.title": "AsciiDoc-Spickzettel öffnen",
   "asciidoc.showSource.title": "Quelltext anzeigen",
+  "asciidoc.compareFiles.title": "AsciiDoc-Dateien vergleichen",
+  "asciidoc.selectForComparison.title": "Für Vergleich auswählen",
+  "asciidoc.compareWithSelected.title": "Vergleichen",
+  "asciidoc.clearComparisonSelection.title": "Vergleichsauswahl aufheben",
   "asciidoc.toggleBold.title": "Fett umschalten",
   "asciidoc.toggleItalic.title": "Kursiv umschalten",
   "asciidoc.toggleMonospace.title": "Monospace umschalten",
@@ -102,5 +106,5 @@
   "asciidoc.wkhtmltopdf_path.deprecationMessage": "Diese Einstellung wurde durch `#asciidoc.pdf.wkhtmltopdfCommandPath#` + `#asciidoc.pdf.wkhtmltopdfCommandArgs#` ersetzt und hat keine Auswirkungen mehr.",
   "asciidoc.wkhtmltopdf_path.desc": "**Veraltet**: Vollständiger Pfad zur `wkhtmltopdf`-Binärdatei.",
   "description": "Stellt Unterstützung für AsciiDoc bereit.",
-  "displayName": "AsciiDoc"
+  "displayName": "AsciiDoc Diff"
 }

@@ -131,7 +131,7 @@ describe('asciidoc.toggleInlineFormatting', () => {
 
     test(`${command} is only offered in AsciiDoc documents`, () => {
       const { contributes } = vscode.extensions.getExtension(
-        'asciidoctor.asciidoctor-vscode',
+        process.env.ASCIIDOC_EXTENSION_ID ?? 'asciidoctor.asciidoctor-vscode',
       )?.packageJSON
       const paletteEntry = contributes.menus.commandPalette.find(
         (entry: { command: string }) => entry.command === command,

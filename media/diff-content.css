@@ -1,0 +1,82 @@
+/* Diff highlight rules, injected into each child preview document.
+ * Colors come from the VS Code diff editor theme variables with a fallback, and
+ * only the background/outline are changed: never font, weight, color or
+ * text-decoration. */
+
+.adoc-diff-word-del {
+  background: var(
+    --vscode-diffEditor-removedTextBackground,
+    rgba(255, 0, 0, 0.22)
+  );
+  border-radius: 2px;
+}
+
+.adoc-diff-word-ins {
+  background: var(
+    --vscode-diffEditor-insertedTextBackground,
+    rgba(0, 128, 0, 0.22)
+  );
+  border-radius: 2px;
+}
+
+.adoc-diff-block-del {
+  background: var(
+    --vscode-diffEditor-removedLineBackground,
+    rgba(255, 0, 0, 0.1)
+  );
+  outline: 1px solid
+    var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.35));
+  outline-offset: -1px;
+}
+
+.adoc-diff-block-ins {
+  background: var(
+    --vscode-diffEditor-insertedLineBackground,
+    rgba(0, 128, 0, 0.1)
+  );
+  outline: 1px solid
+    var(--vscode-diffEditor-insertedTextBackground, rgba(0, 128, 0, 0.35));
+  outline-offset: -1px;
+}
+
+table.adoc-diff-table-del {
+  outline: 1px solid
+    var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.35));
+  outline-offset: -1px;
+}
+
+table.adoc-diff-table-ins {
+  outline: 1px solid
+    var(--vscode-diffEditor-insertedTextBackground, rgba(0, 128, 0, 0.35));
+  outline-offset: -1px;
+}
+
+tr.adoc-diff-row-del {
+  background: var(
+    --vscode-diffEditor-removedLineBackground,
+    rgba(255, 0, 0, 0.1)
+  );
+}
+
+tr.adoc-diff-row-ins {
+  background: var(
+    --vscode-diffEditor-insertedLineBackground,
+    rgba(0, 128, 0, 0.1)
+  );
+}
+
+td.adoc-diff-cell-del,
+th.adoc-diff-cell-del {
+  background: var(
+    --vscode-diffEditor-removedLineBackground,
+    rgba(255, 0, 0, 0.12)
+  );
+}
+
+td.adoc-diff-cell-ins,
+th.adoc-diff-cell-ins {
+  background: var(
+    --vscode-diffEditor-insertedLineBackground,
+    rgba(0, 128, 0, 0.12)
+  );
+}

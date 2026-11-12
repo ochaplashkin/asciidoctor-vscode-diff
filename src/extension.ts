@@ -25,6 +25,9 @@ import { AsciidoctorIncludeItems } from './features/asciidoctor/asciidoctorInclu
 import { ParseCache } from './features/asciidoctor/parseCache.js'
 import { AttributeReferenceHoverProvider } from './features/attributeReferenceHoverProvider.js'
 import { AsciidocCompletionProviders } from './features/completion/completionProviders.js'
+import { CompareSelection } from './features/diff/compareSelection.js'
+import { AsciidocDiffContentProvider } from './features/diff/diffContentProvider.js'
+import { AsciidocDiffManager } from './features/diff/diffManager.js'
 import LinkProvider from './features/documentLinkProvider.js'
 import AdocDocumentSymbolProvider from './features/documentSymbolProvider.js'
 import {
@@ -129,6 +132,14 @@ export async function activate(context: vscode.ExtensionContext) {
     contributionProvider,
   )
   context.subscriptions.push(previewManager)
+  const diffManager = new AsciidocDiffManager(
+    new AsciidocDiffContentProvider(contentProvider),
+    contributionProvider,
+    logger,
+  )
+  context.subscriptions.push(diffManager)
+  const compareSelection = new CompareSelection()
+  context.subscriptions.push(compareSelection)
   context.subscriptions.push(new AsciidocCompletionProviders(asciidocLoader))
   const antoraSupportManager = AntoraSupportManager.getInstance(
     context.workspaceState,
@@ -222,6 +233,16 @@ export async function activate(context: vscode.ExtensionContext) {
     new commands.ShowLockedPreviewToSideCommand(previewManager),
   )
   commandManager.register(new commands.ShowSourceCommand(previewManager))
+  commandManager.register(new commands.CompareFilesCommand(diffManager))
+  commandManager.register(
+    new commands.SelectForComparisonCommand(compareSelection),
+  )
+  commandManager.register(
+    new commands.CompareWithSelectedCommand(diffManager, compareSelection),
+  )
+  commandManager.register(
+    new commands.ClearComparisonSelectionCommand(compareSelection),
+  )
   commandManager.register(new commands.RefreshPreviewCommand(previewManager))
   commandManager.register(
     new commands.ClearCacheCommand(() => {

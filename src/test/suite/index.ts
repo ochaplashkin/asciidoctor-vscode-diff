@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export async function run(): Promise<void> {
   const extension = vscode.extensions.getExtension(
-    'asciidoctor.asciidoctor-vscode',
+    process.env.ASCIIDOC_EXTENSION_ID ?? 'asciidoctor.asciidoctor-vscode',
   )
   await extension?.activate()
   setExtensionContext((globalThis as any).testExtensionContext)

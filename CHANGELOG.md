@@ -1,6 +1,10 @@
 # CHANGELOG
 
-## Unreleased
+## Unreleased - @ochaplashkin
+
+### Features
+
+* Compare the rendered output of two AsciiDoc files side by side, with word-, block- and table-level highlighting and synchronized scrolling. Pick the first file with *Select for Comparison* (a `⇄` badge marks it in the Explorer), then *Compare* on the second one; the *Swap* button reverses the sides
 
 ## 4.3.0 (2026-11-05) - @ggrossetie
 
