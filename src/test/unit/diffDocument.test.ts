@@ -59,10 +59,15 @@ function build(
 }
 
 function pane(html: string, side: 'left' | 'right'): string {
-  const match = new RegExp(
-    `<div id="diff-${side}" class="diff-pane">([\\s\\S]*?)</div>`,
-  ).exec(html)
-  return match?.[1] ?? ''
+  const startMarker = `<div id="diff-${side}" class="diff-pane">`
+  const start = html.indexOf(startMarker)
+  if (start < 0) {
+    return ''
+  }
+  const endMarker =
+    side === 'left' ? '<div id="diff-right" class="diff-pane">' : '</main>'
+  const end = html.indexOf(endMarker, start + startMarker.length)
+  return html.slice(start + startMarker.length, end < 0 ? undefined : end)
 }
 
 describe('buildDiffDocument', () => {

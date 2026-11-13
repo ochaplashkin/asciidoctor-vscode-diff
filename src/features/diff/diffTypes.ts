@@ -12,7 +12,12 @@ import type { Uri } from 'vscode'
 import type { DiffStats } from './blockDiff.js'
 import type { DiffLineMapEntry } from './diffLineMap.js'
 
-export type { DiffStats } from './blockDiff.js'
+export type {
+  DiffCodeBlocksMode,
+  DiffDeletedBlocksMode,
+  DiffRenderOptions,
+  DiffStats,
+} from './blockDiff.js'
 export type { DiffLineMapEntry } from './diffLineMap.js'
 
 export type DiffSide = 'left' | 'right'

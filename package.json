@@ -2,24 +2,22 @@
   "name": "asciidoc-vscode-diff",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "4.3.1-diff.1",
+  "version": "4.3.1-diff.2",
   "publisher": "asciidoc-diff",
-  "author": "Guillaume Grossetie <ggrossetie@yuzutech.fr>",
-  "contributors": [
-    "João Pinto <lamego.pinto@gmail.com>"
-  ],
+  "author": "Oleg Chaplashkin <olegchaplashkin@gmail.com>",
+  "contributors": [],
   "license": "MIT",
   "readme": "README.md",
   "repository": {
     "type": "git",
-    "url": "https://github.com/asciidoctor/asciidoctor-vscode"
+    "url": "https://github.com/ochaplashkin/asciidoctor-vscode-diff"
   },
   "galleryBanner": {
     "color": "#78d6f0",
     "theme": "light"
   },
-  "bugs": "https://github.com/asciidoctor/asciidoctor-vscode/issues",
-  "homepage": "https://github.com/asciidoctor/asciidoctor-vscode/blob/main/README.md",
+  "bugs": "https://github.com/ochaplashkin/asciidoctor-vscode-diff/issues",
+  "homepage": "https://github.com/ochaplashkin/asciidoctor-vscode-diff/blob/main/README.md",
   "icon": "images/icon.png",
   "browser": "./dist/browser/extension",
   "main": "./dist/src/extension.mjs",
@@ -847,6 +845,60 @@
             "type": "string",
             "default": "",
             "markdownDescription": "%asciidoc.antora.siteManifestPath.desc%"
+          }
+        }
+      },
+      {
+        "order": 27,
+        "id": "diff",
+        "title": "%asciidoc.diff.title%",
+        "properties": {
+          "asciidoc.diff.align": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%asciidoc.diff.align.desc%",
+            "scope": "resource"
+          },
+          "asciidoc.diff.deletedBlocks": {
+            "type": "string",
+            "default": "collapse",
+            "enum": [
+              "collapse",
+              "expand"
+            ],
+            "enumDescriptions": [
+              "%asciidoc.diff.deletedBlocks.collapse%",
+              "%asciidoc.diff.deletedBlocks.expand%"
+            ],
+            "markdownDescription": "%asciidoc.diff.deletedBlocks.desc%",
+            "scope": "resource"
+          },
+          "asciidoc.diff.codeBlocks": {
+            "type": "string",
+            "default": "line",
+            "enum": [
+              "line",
+              "block"
+            ],
+            "enumDescriptions": [
+              "%asciidoc.diff.codeBlocks.line%",
+              "%asciidoc.diff.codeBlocks.block%"
+            ],
+            "markdownDescription": "%asciidoc.diff.codeBlocks.desc%",
+            "scope": "resource"
+          },
+          "asciidoc.diff.collapseLines": {
+            "type": "number",
+            "default": 5,
+            "minimum": 1,
+            "markdownDescription": "%asciidoc.diff.collapseLines.desc%",
+            "scope": "resource"
+          },
+          "asciidoc.diff.showStats": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "%asciidoc.diff.showStats.desc%",
+            "scope": "resource"
           }
         }
       }

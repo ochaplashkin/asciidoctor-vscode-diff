@@ -3,6 +3,233 @@
  * only the background/outline are changed: never font, weight, color or
  * text-decoration. */
 
+/* Alignment boundaries: zero-height anchors at the start/end of each preview.
+ * They take part in the client measurement but must not affect the layout. */
+.adoc-diff-boundary {
+  display: block;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+}
+
+/* A gap is drawn on the block that carries the reserved space: `::before` for
+ * a margin-top gap (the space is above the block) and `::after` for a
+ * padding-bottom gap (the space is below the block). Only the background and a
+ * dashed outline are added; the block's text/style are untouched. */
+.adoc-diff-gap-top {
+  position: relative;
+}
+
+.adoc-diff-gap-top::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--adoc-diff-gap-top-offset, 0px);
+  height: var(--adoc-diff-gap-top-h, 0px);
+  box-sizing: border-box;
+  background: var(--adoc-diff-gap-tint, transparent);
+  border: 1px dashed var(--adoc-diff-gap-border, transparent);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.adoc-diff-gap-bottom {
+  position: relative;
+}
+
+.adoc-diff-gap-bottom::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: var(--adoc-diff-gap-bottom-offset, 0px);
+  height: var(--adoc-diff-gap-bottom-h, 0px);
+  box-sizing: border-box;
+  background: var(--adoc-diff-gap-tint, transparent);
+  border: 1px dashed var(--adoc-diff-gap-border, transparent);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* Structural table placeholders: an empty column or row on the side that does
+ * not have it. The tint comes from the `adoc-diff-gap-ins/del` class, so the
+ * same green/red semantics as block gaps applies. */
+.adoc-diff-col-gap,
+tr.adoc-diff-row-gap > td,
+tr.adoc-diff-row-gap > th {
+  background: var(--adoc-diff-gap-tint, transparent);
+}
+
+.adoc-diff-gap-ins {
+  --adoc-diff-gap-tint: var(
+    --vscode-diffEditor-insertedLineBackground,
+    rgba(0, 128, 0, 0.12)
+  );
+  --adoc-diff-gap-border: var(
+    --vscode-diffEditor-insertedTextBackground,
+    rgba(0, 128, 0, 0.4)
+  );
+}
+
+.adoc-diff-gap-del {
+  --adoc-diff-gap-tint: var(
+    --vscode-diffEditor-removedLineBackground,
+    rgba(255, 0, 0, 0.12)
+  );
+  --adoc-diff-gap-border: var(
+    --vscode-diffEditor-removedTextBackground,
+    rgba(255, 0, 0, 0.4)
+  );
+}
+
+.adoc-diff-gap-mixed {
+  --adoc-diff-gap-tint: rgba(128, 128, 128, 0.1);
+  --adoc-diff-gap-border: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+/* A residual gap aligns heights that differ for a non-semantic reason (word
+ * wrapping, a taller edited paragraph). It is intentionally invisible. */
+.adoc-diff-gap-residual {
+  --adoc-diff-gap-tint: transparent;
+  --adoc-diff-gap-border: transparent;
+}
+
+/* Deleted blocks longer than the smart-collapse threshold are kept in the DOM
+ * but take no space. The `−N` strip is the only thing visible; clicking it
+ * expands the block (the `.adoc-diff-expanded` class is toggled by the client). */
+.adoc-diff-collapsed:not(.adoc-diff-expanded) {
+  position: relative;
+  /* Keep the height of the `−N` strip so it does not overlap the next block.
+   * The alignment pass adds the matching space on the other side. */
+  height: 16px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  outline: none !important;
+  color: transparent !important;
+  list-style: none !important;
+  overflow: visible;
+}
+
+.adoc-diff-collapsed:not(.adoc-diff-expanded) > * {
+  display: none !important;
+}
+
+.adoc-diff-collapsed:not(.adoc-diff-expanded)::before {
+  content: "− " attr(data-adoc-diff-collapse-lines);
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 16px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--vscode-editor-foreground, #cccccc);
+  background: var(
+    --vscode-diffEditor-removedLineBackground,
+    rgba(255, 0, 0, 0.18)
+  );
+  border: 1px dashed
+    var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.45));
+  border-radius: 2px;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.adoc-diff-collapsed.adoc-diff-expanded {
+  position: relative;
+}
+
+.adoc-diff-collapsed.adoc-diff-expanded::after {
+  content: "−";
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  color: var(--vscode-editor-foreground, #cccccc);
+  background: var(
+    --vscode-diffEditor-removedLineBackground,
+    rgba(255, 0, 0, 0.18)
+  );
+  border-radius: 2px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* Line-level code diff. Each rendered code line is a block span so the two
+ * panes can have the same number of line boxes even when one side has a gap.
+ * The gutter is drawn by a pseudo-element: marker (`+`, `−`, `~`) and the line
+ * number of that side; gap lines have neither. */
+pre.adoc-diff-code > code {
+  display: block;
+}
+
+.adoc-diff-code-line {
+  position: relative;
+  display: block;
+  padding-left: 3.4em;
+  white-space: inherit;
+}
+
+.adoc-diff-code-line::before {
+  content: attr(data-marker) " " attr(data-line-number);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2.9em;
+  text-align: right;
+  white-space: pre;
+  color: var(--vscode-editorLineNumber-foreground, rgba(128, 128, 128, 0.8));
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  user-select: none;
+}
+
+.adoc-diff-code-line-add {
+  background: var(
+    --vscode-diffEditor-insertedLineBackground,
+    rgba(0, 128, 0, 0.12)
+  );
+}
+
+.adoc-diff-code-line-del {
+  background: var(
+    --vscode-diffEditor-removedLineBackground,
+    rgba(255, 0, 0, 0.12)
+  );
+}
+
+.adoc-diff-code-line-changed {
+  background: rgba(204, 167, 0, 0.12);
+}
+
+.adoc-diff-code-line-gap {
+  color: transparent;
+}
+
+.adoc-diff-code-line-gap::before {
+  content: "";
+}
+
+/* Modified, but neither purely added nor removed: the cell keeps a light amber
+ * tint, while the changed words keep the usual red/green marks. Blocks are not
+ * outlined; `adoc-diff-block-changed` remains as a marker for navigation. */
+.adoc-diff-cell-changed {
+  background: rgba(204, 167, 0, 0.1);
+}
+
 .adoc-diff-word-del {
   background: var(
     --vscode-diffEditor-removedTextBackground,

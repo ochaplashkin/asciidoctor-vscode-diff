@@ -48,10 +48,20 @@ export function visualClasses(el: Element): string[] {
  */
 export function isIgnoredAttribute(name: string): boolean {
   const lower = name.toLowerCase()
+  // The normalized media identity (see `renderDiff.annotateMediaKeys`) is the
+  // only `data-*` attribute that participates in the comparison: the raw
+  // `src`/`poster` values are webview URIs of the two documents and would
+  // differ even for the same image.
+  if (lower === 'data-adoc-diff-key') {
+    return false
+  }
   return (
     lower === 'id' ||
     lower === 'nonce' ||
     lower === 'src' ||
+    lower === 'srcset' ||
+    lower === 'poster' ||
+    lower === 'data' ||
     lower === 'href' ||
     lower === 'srcdoc' ||
     lower.startsWith('data-')
@@ -93,9 +103,11 @@ function collapseWhitespace(text: string): string {
  * and differs otherwise. Text node whitespace is collapsed because the browser
  * collapses whitespace when rendering.
  */
-export function subtreeSignature(node: ChildNode): string {
+export function subtreeSignature(node: ChildNode, verbatim = false): string {
   if (isText(node)) {
-    return `t:${collapseWhitespace(node.value)}`
+    // Whitespace is not visual outside verbatim content, but inside `pre` it is
+    // content: an indentation change is a real, visible change.
+    return `t:${verbatim ? node.value : collapseWhitespace(node.value)}`
   }
   if (isComment(node)) {
     return `c:${node.data}`
@@ -108,7 +120,10 @@ export function subtreeSignature(node: ChildNode): string {
     return `${node.tagName}:${collapseWhitespace(collectText(node))}`
   }
   const attrs = visualAttributePairs(node).join(',')
-  const children = node.childNodes.map(subtreeSignature).join('|')
+  const childVerbatim = verbatim || node.tagName === 'pre'
+  const children = node.childNodes
+    .map((child) => subtreeSignature(child, childVerbatim))
+    .join('|')
   return `<${node.tagName}[${attrs}]>${children}`
 }
 

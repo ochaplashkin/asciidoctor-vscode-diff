@@ -2,6 +2,7 @@ import * as path from 'node:path'
 import * as vscode from 'vscode'
 import { Logger } from '../../core/logger.js'
 import { AsciidocContributionProvider } from '../extensionContributions.js'
+import type { DiffRenderOptions } from './blockDiff.js'
 import { AsciidocDiffContentProvider } from './diffContentProvider.js'
 import { buildDiffDocument } from './diffDocument.js'
 import { AsciidocDiffPanel } from './diffPanel.js'
@@ -53,7 +54,8 @@ export class AsciidocDiffSession {
       if (renderId !== this.renderId) {
         return
       }
-      const result = renderDiff(leftHtml, rightHtml)
+      const options = this.renderOptions()
+      const result = renderDiff(leftHtml, rightHtml, options)
       const diffContentCss = await this.getDiffContentCss()
       this.version++
       this.lastResult = result
@@ -73,6 +75,7 @@ export class AsciidocDiffSession {
           ratio: this.panel.ratio,
           version: this.version,
           stats: result.stats,
+          options,
         }),
       )
     } catch (error) {
@@ -83,6 +86,20 @@ export class AsciidocDiffSession {
 
   public get lastRender(): DiffRenderResult | undefined {
     return this.lastResult
+  }
+
+  private renderOptions(): DiffRenderOptions {
+    const config = vscode.workspace.getConfiguration('asciidoc.diff')
+    return {
+      align: config.get<boolean>('align', true),
+      deletedBlocks: config.get<'collapse' | 'expand'>(
+        'deletedBlocks',
+        'collapse',
+      ),
+      codeBlocks: config.get<'line' | 'block'>('codeBlocks', 'line'),
+      collapseLines: config.get<number>('collapseLines', 5),
+      showStats: config.get<boolean>('showStats', true),
+    }
   }
 
   private async getDiffContentCss(): Promise<string> {

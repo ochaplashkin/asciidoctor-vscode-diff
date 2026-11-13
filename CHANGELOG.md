@@ -5,6 +5,11 @@
 ### Features
 
 * Compare the rendered output of two AsciiDoc files side by side, with word-, block- and table-level highlighting and synchronized scrolling. Pick the first file with *Select for Comparison* (a `⇄` badge marks it in the Explorer), then *Compare* on the second one; the *Swap* button reverses the sides
+* Keep the two rendered panes aligned: an added or removed block reserves the same amount of space on the other side, a long deleted block collapses into a `−N` strip that expands on click, scrolling is synchronized by matched rendered blocks instead of a scroll ratio, and the status shows a `+added −removed ~changed` summary
+
+### Bug fixes
+
+* Keep the comparison focused on the smallest changed unit: a short changed cell, list item or paragraph is no longer highlighted as a whole block or container, an admonition is no longer compared as a data table, a changed code indentation or image is now marked as a modified block, and a table is outlined only when its structure (rows or columns) changes
 
 ## 4.3.0 (2026-11-05) - @ggrossetie
 

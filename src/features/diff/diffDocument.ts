@@ -21,6 +21,10 @@
  * This module is vscode-free.
  */
 
+import {
+  type DiffRenderOptions,
+  defaultDiffRenderOptions,
+} from './blockDiff.js'
 import type { DiffLineMapEntry, DiffStats } from './diffTypes.js'
 import {
   type ChildNode,
@@ -63,6 +67,8 @@ export interface DiffDocumentOptions {
   readonly ratio?: number
   readonly version: number
   readonly stats: DiffStats
+  /** Presentation options; clients should pass the same object as `renderDiff`. */
+  readonly options?: DiffRenderOptions
 }
 
 interface ParsedPreview {
@@ -103,14 +109,18 @@ export function buildDiffDocument(options: DiffDocumentOptions): string {
     options.stats.addedBlocks +
     options.stats.removedBlocks +
     options.stats.changedBlocks +
-    options.stats.changedTables
+    options.stats.changedTables +
+    options.stats.changedCells
   const statusText =
     totalChanges === 0 ? escapeHtml(options.strings.noDifferences) : ''
   const statusClass =
     totalChanges === 0 ? 'diff-status diff-status-clean' : 'diff-status'
 
+  const renderOptions = options.options ?? defaultDiffRenderOptions
   const settings = escapeAttribute(
     JSON.stringify({
+      align: renderOptions.align,
+      showStats: renderOptions.showStats,
       lineMap: options.lineMap,
       leftLineCount: options.leftLineCount,
       rightLineCount: options.rightLineCount,
@@ -146,6 +156,11 @@ ${headHtml}
       <span id="diff-left-title" class="diff-title">${escapeHtml(options.leftTitle)}</span>
     </div>
     <div id="diff-status" class="${statusClass}">${statusText}</div>
+    <div id="diff-legend" class="diff-legend" aria-hidden="true">
+      <span class="diff-legend-item diff-legend-add">+</span>
+      <span class="diff-legend-item diff-legend-del">−</span>
+      <span class="diff-legend-item diff-legend-change">~</span>
+    </div>
     <button id="diff-swap" class="diff-swap" type="button" title="${escapeHtml(options.strings.swap)}" aria-label="${escapeHtml(options.strings.swap)}">
       <span class="diff-swap-icon" aria-hidden="true">⇄</span><span class="diff-swap-label">${escapeHtml(options.strings.swap)}</span>
     </button>
