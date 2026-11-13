@@ -115,6 +115,6 @@
   "asciidoc.use_kroki.desc": "**Obsolète** : Active l'extension Kroki afin de générer des diagrammes.",
   "asciidoc.wkhtmltopdf_path.deprecationMessage": "Ce paramètre a été remplacé par `#asciidoc.pdf.wkhtmltopdfCommandPath#` + `#asciidoc.pdf.wkhtmltopdfCommandArgs#` et n'a plus aucun effet.",
   "asciidoc.wkhtmltopdf_path.desc": "**Obsolète** : Chemin complet vers le binaire/exécutable `wkhtmltopdf`.",
-  "description": "Facilite l'édition et la publication de documents AsciiDoc.",
+  "description": "Fork de l'extension AsciiDoc pour VS Code ajoutant une comparaison côte à côte de documents rendus.",
   "displayName": "AsciiDoc Diff"
 }

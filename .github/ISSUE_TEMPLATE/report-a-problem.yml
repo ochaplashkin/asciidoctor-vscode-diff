@@ -39,7 +39,7 @@ body:
     attributes:
       label: Extension version
       description: Share the installed extension version (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>X</kbd> or <kbd>Cmd</kbd> + <kbd>Shift</kbd> + <kbd>X</kbd> on macOS).
-      placeholder: 4.2.2
+      placeholder: 1.0.0
     validations:
       required: true
   - type: textarea

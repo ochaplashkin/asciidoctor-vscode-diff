@@ -1,6 +1,12 @@
 # CHANGELOG
 
-## Unreleased - @ochaplashkin
+> This fork starts its own versioning at 1.0.0. The entries that follow this section are
+> inherited from the upstream [AsciiDoc extension](https://github.com/asciidoctor/asciidoctor-vscode).
+
+## 1.0.0 (2026-11-13)
+
+First independent release, based on the upstream AsciiDoc for VS Code 4.3.1 development
+branch.
 
 ### Features
 

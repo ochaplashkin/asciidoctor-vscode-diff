@@ -115,6 +115,6 @@
   "asciidoc.use_kroki.desc": "**Veraltet**: Aktiviert die Kroki-Integration zur Generierung von Diagrammen.",
   "asciidoc.wkhtmltopdf_path.deprecationMessage": "Diese Einstellung wurde durch `#asciidoc.pdf.wkhtmltopdfCommandPath#` + `#asciidoc.pdf.wkhtmltopdfCommandArgs#` ersetzt und hat keine Auswirkungen mehr.",
   "asciidoc.wkhtmltopdf_path.desc": "**Veraltet**: Vollständiger Pfad zur `wkhtmltopdf`-Binärdatei.",
-  "description": "Stellt Unterstützung für AsciiDoc bereit.",
+  "description": "Fork der AsciiDoc-Erweiterung für VS Code mit einem Side-by-Side-Vergleich gerenderter Dokumente.",
   "displayName": "AsciiDoc Diff"
 }

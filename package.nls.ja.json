@@ -115,6 +115,6 @@
   "asciidoc.use_kroki.desc": "**非推奨:** ダイアグラム生成Krokiを使用します。",
   "asciidoc.wkhtmltopdf_path.deprecationMessage": "本設定は、`#asciidoc.pdf.wkhtmltopdfCommandPath#` + `#asciidoc.pdf.wkhtmltopdfCommandArgs#`に置き換えられ、動作しません。",
   "asciidoc.wkhtmltopdf_path.desc": "**非推奨:** wkhtmltopdfの実行バイナリのフルパスを指定します。",
-  "description": "リッチで軽量なマークアップであるAsciiDocをサポートします。",
+  "description": "レンダリング結果を並べて比較する機能を追加した、VS Code 用 AsciiDoc 拡張機能のフォーク。",
   "displayName": "AsciiDoc Diff"
 }

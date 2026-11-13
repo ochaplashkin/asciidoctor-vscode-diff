@@ -8,14 +8,19 @@
 # devDependencies never reach here.
 **/*
 
-!images/icon.png
-!dist/
+!images/icon-diff.png
+# Ship the built JavaScript only: source maps are development artifacts and are
+# not needed by VS Code at runtime.
+!dist/**/*.js
+!dist/**/*.mjs
+!dist/**/*.json
 !snippets/
 !media/
 !package.json
 !package.nls*.json
 !en.json
-!/*.md
+!README.md
+!CHANGELOG.md
 !asciidoc-language-configuration.json
 !LICENSE
 

@@ -19,7 +19,7 @@ Do not update the extension version: maintainers do this when a new version is r
 
 Before developing changes, install the following prerequisites:
 
-. https://nodejs.org/en/[Node 20 or later]
+. https://nodejs.org/en/[Node 22 or later] (Node 20 is enough to run the extension, but the test tooling requires Node 22 or later)
 . https://code.visualstudio.com/[Visual Studio Code]
 . https://git-scm.com/[Git]
 
@@ -27,7 +27,7 @@ Before developing changes, install the following prerequisites:
 
 . Clone the repository from GitHub.
 +
- $ git clone https://github.com/asciidoctor/asciidoctor-vscode.git
+ $ git clone https://github.com/ochaplashkin/asciidoctor-vscode-diff.git
 
 . Open the folder within Visual Studio Code.
 
@@ -109,7 +109,7 @@ Write it from the point of view of users, in one or two sentences, and end it wi
 New features and bug fixes must come with tests.
 Tests that need the VS Code API live in `src/test/`, and tests that don't live in `src/test/unit/`.
 
-Before creating a pull request, make sure that the following commands succeed, as the CI runs them on Linux and Windows (lint and format on Linux only):
+Before creating a pull request, make sure that the following commands succeed:
 
  $ npm run lint
  $ npm run format
@@ -153,4 +153,4 @@ To run the grammar tests:
 
 To update the snapshots after intentional grammar changes:
 
- $ npx vscode-tmgrammar-snap -u -g syntaxes/asciidoc.tmLanguage.json -g syntaxes/ruby.tmLanguage.json syntaxes/tests/snap/**/**.adoc
+ $ npx textmate-grammar-snap -u -g syntaxes/asciidoc.tmLanguage.json -g syntaxes/ruby.tmLanguage.json syntaxes/tests/snap/**/**.adoc

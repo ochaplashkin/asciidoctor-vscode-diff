@@ -115,6 +115,6 @@
   "asciidoc.use_kroki.desc": "**Deprecated:** Enables Kroki integration to generate diagrams.",
   "asciidoc.wkhtmltopdf_path.deprecationMessage": "This setting has been replaced by `#asciidoc.pdf.wkhtmltopdfCommandPath#` + `#asciidoc.pdf.wkhtmltopdfCommandArgs#` and no longer has any effect.",
   "asciidoc.wkhtmltopdf_path.desc": "**Deprecated**: Full path to the `wkhtmltopdf` binary/executable.",
-  "description": "Provides rich language support for AsciiDoc.",
+  "description": "Fork of the AsciiDoc extension for VS Code that adds a side-by-side comparison of rendered documents.",
   "displayName": "AsciiDoc Diff"
 }
