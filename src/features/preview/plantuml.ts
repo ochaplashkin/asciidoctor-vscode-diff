@@ -80,6 +80,16 @@ export function plantUmlClientRenderScript(strings: PlantUmlStrings): string {
   return `
     const PLANTUML_SOURCE_PREFIX = ${JSON.stringify(PLANTUML_SOURCE_DATA_URI_PREFIX)};
     let plantUmlQueue = Promise.resolve(0);
+    // A rendered diff marks a changed image with \`adoc-diff-*\` classes. The
+    // diagram replaces the image, so move the markers to what replaces it;
+    // otherwise the outline/word markers would leave the page with the image.
+    function copyPlantUmlDiffMarkers(from, to) {
+      const markers = Array.from(from.classList ?? []).filter((name) => name.startsWith('adoc-diff-'));
+      for (const name of markers) {
+        to.classList?.add(name);
+        to.querySelectorAll?.('svg').forEach((svg) => svg.classList.add(name));
+      }
+    }
     function plantUmlToSvg(engine, source, options) {
       return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error(${JSON.stringify(strings.timeout)})), ${RENDER_TIMEOUT_MS});
@@ -154,6 +164,7 @@ export function plantUmlClientRenderScript(strings: PlantUmlStrings): string {
           img.remove();
         } else {
           displayed?.remove();
+          copyPlantUmlDiffMarkers(img, container);
           img.replaceWith(container);
         }
       });

@@ -20,6 +20,7 @@
 
 import {
   type AlignGapKind,
+  type AlignGapObject,
   type AlignGapPosition,
   type AlignInterval,
   type AlignSpace,
@@ -31,11 +32,29 @@ interface AnchorPair {
   readonly right: HTMLElement
 }
 
+interface GapInfo {
+  readonly position: AlignGapPosition
+  readonly kind: AlignGapKind
+  readonly count?: number
+  readonly object?: AlignGapObject
+}
+
 interface SpaceState {
   top: number
   bottom: number
   kindTop: AlignGapKind
   kindBottom: AlignGapKind
+  countTop?: number
+  countBottom?: number
+  objectTop?: AlignGapObject
+  objectBottom?: AlignGapObject
+}
+
+export interface AlignmentOptions {
+  /** Localized strings; the labels and tooltips come from the extension's l10n. */
+  readonly strings?: Record<string, string>
+  /** Called when the expanded/collapsed state of a deleted block changes. */
+  readonly onExpandedChange?: (keys: string[]) => void
 }
 
 type SpaceSide = 'top' | 'bottom'
@@ -62,6 +81,10 @@ export class AlignmentController {
     { paddingTop: string; paddingBottom: string }
   >()
   private readonly disposables: Array<() => void> = []
+  /** Labels drawn over the reserved gap; they live outside the preview DOM. */
+  private readonly gapOverlays = new Set<HTMLElement>()
+  private readonly strings: Record<string, string>
+  private readonly onExpandedChange?: (keys: string[]) => void
   private resizeObserver: ResizeObserver | undefined
   private mutationObserver: MutationObserver | undefined
   private timer: number | undefined
@@ -72,13 +95,37 @@ export class AlignmentController {
   constructor(
     private readonly leftPane: HTMLElement,
     private readonly rightPane: HTMLElement,
-  ) {}
+    options: AlignmentOptions = {},
+  ) {
+    this.strings = options.strings ?? {}
+    this.onExpandedChange = options.onExpandedChange
+  }
+
+  /** Re-measures after a change made by another part of the client. */
+  public refresh(): void {
+    this.schedule(0)
+  }
+
+  /** The collapse keys currently expanded by the reader. */
+  public expandedKeys(): string[] {
+    const keys: string[] = []
+    for (const element of this.leftPane.querySelectorAll<HTMLElement>(
+      '[data-adoc-diff-collapse-key]',
+    )) {
+      if (element.classList.contains('adoc-diff-expanded')) {
+        keys.push(element.getAttribute('data-adoc-diff-collapse-key') ?? '')
+      }
+    }
+    return keys.filter((key) => key !== '')
+  }
 
   public start(): void {
     for (const element of this.leftPane.querySelectorAll<HTMLElement>(
       '[data-adoc-diff-collapsed]',
     )) {
-      element.title = 'Click to expand deleted block'
+      element.title = element.classList.contains('adoc-diff-expanded')
+        ? this.text('collapseCollapse', 'Click to collapse deleted block')
+        : this.text('collapseExpand', 'Click to expand deleted block')
     }
     this.schedule(0)
     this.observe()
@@ -297,14 +344,20 @@ export class AlignmentController {
       }
       collapsed.classList.toggle('adoc-diff-expanded', !expanded)
       collapsed.title = expanded
-        ? 'Expand deleted block'
-        : 'Collapse deleted block'
+        ? this.text('collapseExpand', 'Click to expand deleted block')
+        : this.text('collapseCollapse', 'Click to collapse deleted block')
+      this.onExpandedChange?.(this.expandedKeys())
       this.schedule(0)
     }
     for (const pane of [this.leftPane, this.rightPane]) {
       pane.addEventListener('click', onClick)
       this.disposables.push(() => pane.removeEventListener('click', onClick))
     }
+  }
+
+  private text(key: string, fallback: string): string {
+    const value = this.strings[key]
+    return value !== undefined && value !== '' ? value : fallback
   }
 
   private alignTables(): void {
@@ -438,6 +491,10 @@ export class AlignmentController {
         rightPosition: rightGap?.position ?? 'before',
         leftKind: leftGap?.kind,
         rightKind: rightGap?.kind,
+        leftCount: leftGap?.count,
+        rightCount: rightGap?.count,
+        leftObject: leftGap?.object,
+        rightObject: rightGap?.object,
       })
     }
     return intervals
@@ -446,10 +503,14 @@ export class AlignmentController {
   private gapInfo(
     previous: HTMLElement,
     current: HTMLElement,
-  ): { position: AlignGapPosition; kind: AlignGapKind } | undefined {
+  ): GapInfo | undefined {
     const before = current.getAttribute('data-adoc-diff-gap')
     if (before !== null) {
-      return { position: 'before', kind: normalizeKind(before) }
+      return {
+        position: 'before',
+        kind: normalizeKind(before),
+        ...gapDetails(current),
+      }
     }
     // A trailing gap may be marked on a container of the previous anchor (a
     // section, a list, a cell), not on the immediate anchor.
@@ -457,7 +518,11 @@ export class AlignmentController {
     while (node) {
       const after = node.getAttribute('data-adoc-diff-gap-after')
       if (after !== null) {
-        return { position: 'after', kind: normalizeKind(after) }
+        return {
+          position: 'after',
+          kind: normalizeKind(after),
+          ...gapDetails(node),
+        }
       }
       node = node.parentElement
     }
@@ -501,10 +566,24 @@ export class AlignmentController {
     }
     for (const [element, state] of states) {
       if (state.top > 0) {
-        this.applyPadding(element, 'top', state.top, state.kindTop)
+        this.applyPadding(
+          element,
+          'top',
+          state.top,
+          state.kindTop,
+          state.countTop,
+          state.objectTop,
+        )
       }
       if (state.bottom > 0) {
-        this.applyPadding(element, 'bottom', state.bottom, state.kindBottom)
+        this.applyPadding(
+          element,
+          'bottom',
+          state.bottom,
+          state.kindBottom,
+          state.countBottom,
+          state.objectBottom,
+        )
       }
     }
   }
@@ -538,6 +617,8 @@ export class AlignmentController {
     position: SpaceSide,
     height: number,
     kind: AlignGapKind,
+    count?: number,
+    object?: AlignGapObject,
   ): void {
     this.rememberBase(element)
     const style = window.getComputedStyle(element)
@@ -557,7 +638,50 @@ export class AlignmentController {
       position === 'top' ? 'adoc-diff-gap-top' : 'adoc-diff-gap-bottom',
       gapKindClass(this.effectiveKind(element, kind)),
     )
+    const effectiveKind = this.effectiveKind(element, kind)
+    // The gap is deliberately a plain gray block: no "1 added block" or
+    // "1 removed block" text. The count stays on the element as metadata for
+    // debugging and for the manual harness, but it is not rendered.
+    const label = gapLabelText(this.strings, effectiveKind, count, object)
+    if (label !== undefined) {
+      element.setAttribute('data-adoc-diff-gap-label', label)
+    }
+    this.renderGapOverlay(element, position, height, effectiveKind)
     this.carriers.add(element)
+  }
+
+  /**
+   * Draws the neutral gap tint as an overlay in the pane, not as a
+   * `::before`/`::after` on the carrier. The preview stylesheet already uses
+   * those pseudo-elements on several containers (`#content` has a clearfix
+   * `::after` and a `::before { content: none }`), which silently swallowed the
+   * gap on an added top-level section.
+   */
+  private renderGapOverlay(
+    element: HTMLElement,
+    position: SpaceSide,
+    height: number,
+    kind: AlignGapKind,
+  ): void {
+    if (height <= 0) {
+      return
+    }
+    const pane = element.closest<HTMLElement>('.diff-pane')
+    if (!pane) {
+      return
+    }
+    const overlay = document.createElement('div')
+    overlay.className = `adoc-diff-gap-overlay adoc-diff-gap-overlay-${position}`
+    overlay.classList.add(`adoc-diff-gap-${kind}`)
+    overlay.setAttribute('aria-hidden', 'true')
+    const paneRect = pane.getBoundingClientRect()
+    const rect = element.getBoundingClientRect()
+    overlay.style.top = `${rect.top - paneRect.top + pane.scrollTop + (position === 'bottom' ? rect.height - height : 0)}px`
+    overlay.style.left = `${rect.left - paneRect.left + pane.scrollLeft}px`
+    overlay.style.width = `${rect.width}px`
+    overlay.style.height = `${height}px`
+    pane.appendChild(overlay)
+    this.gapOverlays.add(overlay)
   }
 
   private effectiveKind(
@@ -585,6 +709,10 @@ export class AlignmentController {
   }
 
   private resetSpaces(): void {
+    for (const overlay of this.gapOverlays) {
+      overlay.remove()
+    }
+    this.gapOverlays.clear()
     for (const element of this.carriers) {
       const base = this.baseInline.get(element)
       element.style.paddingTop = base?.paddingTop ?? ''
@@ -598,6 +726,7 @@ export class AlignmentController {
         element.style.removeProperty(property)
       }
       element.classList.remove(...GAP_CLASSES)
+      element.removeAttribute('data-adoc-diff-gap-label')
     }
     this.carriers.clear()
   }
@@ -645,11 +774,67 @@ function addSpace(
   if (position === 'top') {
     state.top += space.height
     state.kindTop = mergeKind(state.kindTop, space.kind)
+    if (state.countTop === undefined && space.count !== undefined) {
+      state.countTop = space.count
+      state.objectTop = space.object
+    }
   } else {
     state.bottom += space.height
     state.kindBottom = mergeKind(state.kindBottom, space.kind)
+    if (state.countBottom === undefined && space.count !== undefined) {
+      state.countBottom = space.count
+      state.objectBottom = space.object
+    }
   }
   states.set(element, state)
+}
+
+function gapDetails(el: HTMLElement): {
+  count?: number
+  object?: AlignGapObject
+} {
+  const raw = el.getAttribute('data-adoc-diff-gap-count')
+  if (raw === null) {
+    return {}
+  }
+  const count = Number(raw)
+  if (!Number.isFinite(count) || count <= 0) {
+    return {}
+  }
+  const object = el.getAttribute('data-adoc-diff-gap-object')
+  return {
+    count,
+    object: object === 'table' || object === 'lines' ? object : 'blocks',
+  }
+}
+
+function gapLabelText(
+  strings: Record<string, string>,
+  kind: AlignGapKind,
+  count: number | undefined,
+  object: AlignGapObject | undefined,
+): string | undefined {
+  if (count === undefined || kind === 'residual') {
+    return undefined
+  }
+  const plural =
+    object === 'table' ? 'Table' : object === 'lines' ? 'Lines' : 'Blocks'
+  const singular =
+    object === 'table' ? 'TableRow' : object === 'lines' ? 'Line' : 'Block'
+  const prefix =
+    kind === 'ins' ? 'Added' : kind === 'del' ? 'Removed' : 'Changed'
+  // English and the other supported languages have a singular form; Japanese
+  // uses the same template for both.
+  const key = count === 1 ? `gap${prefix}${singular}` : `gap${prefix}${plural}`
+  const fallback = `${count} ${prefix.toLowerCase()} ${object ?? 'blocks'}`
+  return format(strings[key] ?? fallback, [String(count)])
+}
+
+function format(template: string, values: readonly string[]): string {
+  return template.replace(/\{(\d+)\}/g, (match, index: string) => {
+    const value = values[Number(index)]
+    return value !== undefined ? value : match
+  })
 }
 
 function mergeKind(current: AlignGapKind, next: AlignGapKind): AlignGapKind {

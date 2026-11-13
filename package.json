@@ -2,7 +2,7 @@
   "name": "asciidoc-vscode-diff",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "adoc-diff",
   "author": "Oleg Chaplashkin <olegchaplashkin@gmail.com>",
   "contributors": [

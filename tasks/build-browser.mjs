@@ -91,7 +91,9 @@ async function copyAssets(srcDir, destDir) {
       }
       await fs.mkdir(destPath, { recursive: true })
       await copyAssets(srcPath, destPath)
-    } else if (!entry.name.endsWith('.ts')) {
+    } else if (entry.name !== 'package.json' && !entry.name.endsWith('.ts')) {
+      // src/package.json only marks the sources as ES modules; it must not replace
+      // the CommonJS manifest of the bundle written below.
       await fs.copyFile(srcPath, destPath)
     }
   }
@@ -99,10 +101,14 @@ async function copyAssets(srcDir, destDir) {
 
 const root = path.join(__dirname, '..')
 await fs.mkdir(path.join(root, 'dist', 'browser'), { recursive: true })
-// Override "type": "module" from root package.json so the CJS bundle is loaded correctly
-// by VS Code's web worker extension host
-await fs.writeFile(
-  path.join(root, 'dist', 'browser', 'package.json'),
-  JSON.stringify({ type: 'commonjs' }),
-)
 await copyAssets(path.join(root, 'src'), path.join(root, 'dist', 'browser'))
+// The browser entry is a CommonJS bundle: declare it in dist/browser/package.json so
+// VS Code's web extension host loads it correctly.
+const browserPackagePath = path.join(root, 'dist', 'browser', 'package.json')
+await fs.writeFile(browserPackagePath, JSON.stringify({ type: 'commonjs' }))
+const browserPackage = JSON.parse(await fs.readFile(browserPackagePath, 'utf8'))
+if (browserPackage.type !== 'commonjs') {
+  throw new Error(
+    `dist/browser/package.json must declare "type": "commonjs", got ${JSON.stringify(browserPackage)}`,
+  )
+}

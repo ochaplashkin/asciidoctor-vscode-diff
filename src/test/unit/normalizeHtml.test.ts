@@ -4,6 +4,8 @@ import { type Element, parseFragment } from '../../features/diff/htmlTree.js'
 import {
   isIgnoredAttribute,
   isServiceClass,
+  nonVisualKinds,
+  ownNonVisualKinds,
   subtreeSignature,
   subtreesEqual,
   visualClasses,
@@ -104,5 +106,51 @@ describe('subtreeSignature', () => {
     const a = firstElement('<section><h2 data-line-1>Title</h2></section>')
     const b = firstElement('<section><h2 data-line-9>Title</h2></section>')
     assert.equal(subtreesEqual(a, b), true)
+  })
+})
+
+describe('nonVisualKinds', () => {
+  test('reports a formatting-only tag change', () => {
+    const left = firstElement('<p><strong>same</strong></p>')
+    const right = firstElement('<p><em>same</em></p>')
+    assert.deepEqual([...nonVisualKinds(left, right)], ['formatting'])
+  })
+
+  test('reports a changed class or style as formatting', () => {
+    const a = firstElement('<p class="text-left">same</p>')
+    const b = firstElement('<p class="text-center">same</p>')
+    assert.deepEqual([...nonVisualKinds(a, b)], ['formatting'])
+  })
+
+  test('reports an id change', () => {
+    const a = firstElement('<div id="old"><p>x</p></div>')
+    const b = firstElement('<div id="new"><p>x</p></div>')
+    assert.deepEqual([...nonVisualKinds(a, b)], ['id'])
+  })
+
+  test('reports a changed link target through the annotated key', () => {
+    const a = firstElement(
+      '<p><a href="a.html" data-adoc-diff-link-key="a.html">x</a></p>',
+    )
+    const b = firstElement(
+      '<p><a href="b.html" data-adoc-diff-link-key="b.html">x</a></p>',
+    )
+    assert.deepEqual([...nonVisualKinds(a, b)], ['link'])
+    // The raw href is still ignored by the visual signature.
+    assert.equal(subtreeSignature(a), subtreeSignature(b))
+  })
+
+  test('reports nothing for two visually and semantically identical subtrees', () => {
+    const a = firstElement('<div id="same" class="role"><p>text</p></div>')
+    const b = firstElement('<div id="same" class="role"><p>text</p></div>')
+    assert.deepEqual([...nonVisualKinds(a, b)], [])
+  })
+
+  test('ownNonVisualKinds ignores the descendants', () => {
+    const a = firstElement('<div class="one"><p>x</p></div>')
+    const b = firstElement('<div class="two"><p>x</p></div>')
+    assert.deepEqual(ownNonVisualKinds(a, b), ['formatting'])
+    const c = firstElement('<div class="one"><p class="inner">x</p></div>')
+    assert.deepEqual(ownNonVisualKinds(a, c), [])
   })
 })

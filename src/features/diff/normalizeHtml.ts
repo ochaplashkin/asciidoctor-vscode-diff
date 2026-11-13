@@ -103,7 +103,11 @@ function collapseWhitespace(text: string): string {
  * and differs otherwise. Text node whitespace is collapsed because the browser
  * collapses whitespace when rendering.
  */
-export function subtreeSignature(node: ChildNode, verbatim = false): string {
+export function subtreeSignature(
+  node: ChildNode,
+  verbatim = false,
+  ignoreGeneratedNavigation = true,
+): string {
   if (isText(node)) {
     // Whitespace is not visual outside verbatim content, but inside `pre` it is
     // content: an indentation change is a real, visible change.
@@ -119,10 +123,20 @@ export function subtreeSignature(node: ChildNode, verbatim = false): string {
   if (node.tagName === 'script' || node.tagName === 'style') {
     return `${node.tagName}:${collapseWhitespace(collectText(node))}`
   }
+  // The table of contents is generated navigation, not content: an included
+  // signature would count every heading change twice, add gap markers inside
+  // the navigation, and take part in the alignment. It is compared separately
+  // (`navigationSignature`) so a TOC-only change is not a false "No
+  // differences".
+  if (ignoreGeneratedNavigation && getAttribute(node, 'id') === 'toc') {
+    return ''
+  }
   const attrs = visualAttributePairs(node).join(',')
   const childVerbatim = verbatim || node.tagName === 'pre'
   const children = node.childNodes
-    .map((child) => subtreeSignature(child, childVerbatim))
+    .map((child) =>
+      subtreeSignature(child, childVerbatim, ignoreGeneratedNavigation),
+    )
     .join('|')
   return `<${node.tagName}[${attrs}]>${children}`
 }
@@ -132,4 +146,108 @@ export function subtreeSignature(node: ChildNode, verbatim = false): string {
  */
 export function subtreesEqual(left: ChildNode, right: ChildNode): boolean {
   return subtreeSignature(left) === subtreeSignature(right)
+}
+
+/**
+ * The signature of a subtree including its generated navigation. Used only to
+ * compare the two tables of contents: a changed TOC is a real (navigation)
+ * difference even when every heading is the same, for instance after changing
+ * `:toclevels:`.
+ */
+export function navigationSignature(node: ChildNode): string {
+  return subtreeSignature(node, false, false)
+}
+
+/**
+ * The kind of a difference that is real but invisible in the rendered text.
+ *
+ * - `formatting`: the same text rendered with another tag or attribute (for
+ *   example `<strong>` vs `<em>`, or a changed `class`/`style`);
+ * - `link`: the target of a link changed, so a cross-reference now points
+ *   elsewhere while the visible text stayed the same;
+ * - `id`: an anchor id changed, which breaks incoming `#fragment` links.
+ */
+export type NonVisualChangeKind = 'formatting' | 'link' | 'id'
+
+/**
+ * The identity of a link target, comparable between two documents.
+ *
+ * `renderDiff` annotates every `href` with a document-relative
+ * `data-adoc-diff-link-key` (the raw `href` carries the document path, like
+ * `src` does for images), so the annotated key wins when present.
+ */
+export function linkTargetKey(el: Element): string | undefined {
+  return getAttribute(el, 'data-adoc-diff-link-key') ?? getAttribute(el, 'href')
+}
+
+function idOf(el: Element): string {
+  return getAttribute(el, 'id') ?? ''
+}
+
+/**
+ * The kind of a difference between an element and its counterpart, ignoring
+ * the descendants: tag, `id`, link target and visual attributes.
+ */
+export function ownNonVisualKinds(
+  left: Element,
+  right: Element,
+): NonVisualChangeKind[] {
+  const kinds = new Set<NonVisualChangeKind>()
+  if (left.tagName !== right.tagName) {
+    kinds.add('formatting')
+  }
+  if (idOf(left) !== idOf(right)) {
+    kinds.add('id')
+  }
+  if ((linkTargetKey(left) ?? '') !== (linkTargetKey(right) ?? '')) {
+    kinds.add('link')
+  }
+  if (
+    visualAttributePairs(left).join(',') !==
+    visualAttributePairs(right).join(',')
+  ) {
+    kinds.add('formatting')
+  }
+  return [...kinds]
+}
+
+function collectNonVisualKinds(
+  left: Element,
+  right: Element,
+  kinds: Set<NonVisualChangeKind>,
+): void {
+  for (const kind of ownNonVisualKinds(left, right)) {
+    kinds.add(kind)
+  }
+  const leftChildren = left.childNodes
+  const rightChildren = right.childNodes
+  if (leftChildren.length !== rightChildren.length) {
+    kinds.add('formatting')
+    return
+  }
+  for (let index = 0; index < leftChildren.length; index++) {
+    const leftChild = leftChildren[index]
+    const rightChild = rightChildren[index]
+    if (isElement(leftChild) && isElement(rightChild)) {
+      collectNonVisualKinds(leftChild, rightChild, kinds)
+    } else if (isElement(leftChild) !== isElement(rightChild)) {
+      kinds.add('formatting')
+    }
+  }
+}
+
+/**
+ * Every kind of non-visual difference between two subtrees.
+ *
+ * The caller only uses this for subtrees whose *visible* signature is equal:
+ * otherwise the visual diff already reports the change and a formatting badge
+ * on the same block would count it twice.
+ */
+export function nonVisualKinds(
+  left: Element,
+  right: Element,
+): Set<NonVisualChangeKind> {
+  const kinds = new Set<NonVisualChangeKind>()
+  collectNonVisualKinds(left, right, kinds)
+  return kinds
 }

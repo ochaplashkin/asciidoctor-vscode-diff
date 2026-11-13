@@ -23,7 +23,9 @@ result rather than in the source text.
 ## What this fork adds
 
 - Rendered comparison with word-, block-, table-, and code-level highlighting.
-- Aligned panes, synchronized scrolling, collapsible deletions, and a change summary.
+- Aligned panes, synchronized scrolling, collapsible deletions, and a change navigator: the header shows `3 / 12`, click goes to the next change, Shift+click to the previous one.
+- Honest summaries: formatting-only, link-target and anchor-id changes are reported as "No visual text differences" with a small badge instead of being silently ignored.
+- Reading position and expanded deletions survive live updates; saving without changes does not reload the panes.
 - A **Swap** button to reverse the two sides.
 - Live updates while either document is edited or saved.
 - A small set of `asciidoc.diff.*` settings.
@@ -60,6 +62,12 @@ You can also open an AsciiDoc file and run **AsciiDoc: Compare AsciiDoc Files** 
 Command Palette, then pick the second file. To clear a selection, click the status bar
 entry or choose **AsciiDoc → Clear Comparison Selection**.
 
+The repository contains a complex pair for manual testing,
+[`examples/diff-complex/v1/index.adoc`](examples/diff-complex/v1/index.adoc) and
+[`examples/diff-complex/v2/index.adoc`](examples/diff-complex/v2/index.adoc): the same file
+name in two directories, with a changed table column, an inserted row, a changed cell, code
+edits, an image change, a removed long section and formatting/link/anchor differences.
+
 ## Settings
 
 | Setting | Default | Purpose |
@@ -68,7 +76,7 @@ entry or choose **AsciiDoc → Clear Comparison Selection**.
 | `asciidoc.diff.deletedBlocks` | `collapse` | Collapse long deleted blocks into a `−N` strip, or keep them expanded. |
 | `asciidoc.diff.codeBlocks` | `line` | Compare code blocks line by line or as a whole block. |
 | `asciidoc.diff.collapseLines` | `5` | Threshold for collapsing a deleted block. |
-| `asciidoc.diff.showStats` | `true` | Show the `+added −removed ~changed` summary. |
+| `asciidoc.diff.showStats` | `true` | Show the color legend. The change navigator is always available, and the detailed `+added −removed ~changed` numbers are in its tooltip. |
 
 ## What comes from upstream
 

@@ -3,30 +3,60 @@
  *
  * Both previews are rendered into the same webview document, one per scrollable
  * pane (`#diff-left`, `#diff-right`). This script keeps their vertical scroll in
- * sync, reports the scroll ratio, and renders the status.
+ * sync, restores the reading position and the expanded deleted blocks after a
+ * live re-render, and turns the status into a navigator through the change
+ * regions ("hunks") the kernel marked with `data-adoc-diff-hunk`.
  *
- * The panes are synchronized *proportionally* (the same fraction of the
- * scrollable range on each side). This is cheap enough to run every frame — no
- * DOM measurement — so the driven pane scrolls as smoothly as the active one,
- * and it is symmetric at the edges: both panes start at the top and end at the
- * bottom together, which removes the jump that an anchor-based mapping causes
- * when one side is clamped at its end.
+ * The panes are synchronized by *anchors* (the matched rendered blocks), and
+ * fall back to the same fraction of the scrollable range when no anchor is
+ * available.
  */
 
 import { AlignmentController } from './diff-align.js'
+
+interface DiffStats {
+  changes?: number
+  visualChanges?: number
+  nonVisualChanges?: number
+  addedBlocks?: number
+  removedBlocks?: number
+  movedBlocks?: number
+  changedBlocks?: number
+  changedTables?: number
+  changedCells?: number
+  formattingChanges?: number
+  linkChanges?: number
+  idChanges?: number
+  navigationChanges?: number
+}
+
+interface LineMapEntry {
+  leftLine: number
+  rightLine: number
+}
 
 interface Settings {
   align?: boolean
   showStats?: boolean
   ratio?: number
+  leftLine?: number
+  rightLine?: number
+  expanded?: string[]
+  lineMap?: LineMapEntry[]
+  leftLineCount?: number
+  rightLineCount?: number
   strings?: Record<string, string>
-  stats?: {
-    addedBlocks: number
-    removedBlocks: number
-    changedBlocks: number
-    changedTables: number
-    changedCells: number
-  }
+  stats?: DiffStats
+}
+
+interface LineAnchor {
+  readonly element: HTMLElement
+  readonly line: number
+}
+
+interface HunkTarget {
+  readonly pane: HTMLElement
+  readonly element: HTMLElement
 }
 
 const dataElement = document.getElementById('vscode-asciidoc-diff-data')
@@ -40,18 +70,14 @@ const rightPane = document.getElementById('diff-right') as HTMLElement | null
 const statusElement = document.getElementById('diff-status')
 const legendElement = document.getElementById('diff-legend')
 
-const alignment =
-  settings.align !== false && leftPane && rightPane
-    ? new AlignmentController(leftPane, rightPane)
-    : undefined
-alignment?.start()
-
 declare function acquireVsCodeApi(): {
   postMessage(message: unknown): void
+  setState?(state: unknown): void
+  getState?(): unknown
 }
 
 // A docinfo script may have acquired the webview API already; scrolling still
-// works without it, only `didScroll` is lost.
+// works without it, only the messages to the host are lost.
 let api: { postMessage(message: unknown): void } | undefined
 try {
   api = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : undefined
@@ -61,6 +87,18 @@ try {
 
 function post(type: string, body: Record<string, unknown> = {}) {
   api?.postMessage({ type, ...body })
+}
+
+function text(key: string, fallback: string): string {
+  const value = strings[key]
+  return value !== undefined && value !== '' ? value : fallback
+}
+
+function format(template: string, values: readonly (string | number)[]) {
+  return template.replace(/\{(\d+)\}/g, (match, index: string) => {
+    const value = values[Number(index)]
+    return value !== undefined ? String(value) : match
+  })
 }
 
 /** The scroll offset we last set programmatically on each pane. */
@@ -79,6 +117,14 @@ function scrollRatio(pane: HTMLElement): number {
     return 0
   }
   return Math.min(1, Math.max(0, pane.scrollTop / max))
+}
+
+function contentTop(pane: HTMLElement, element: Element): number {
+  return (
+    element.getBoundingClientRect().top -
+    pane.getBoundingClientRect().top +
+    pane.scrollTop
+  )
 }
 
 function setScroll(
@@ -172,7 +218,680 @@ function syncFrom(side: 'left' | 'right'): void {
   } else {
     setScroll(targetSide, target, ratio * maxScroll(target))
   }
-  post('didScroll', { ratio })
+}
+
+/* ------------------------------------------------------------------ */
+/* Source-line restore and reporting                                    */
+/* ------------------------------------------------------------------ */
+
+function lineOfElement(element: Element): number | undefined {
+  const attr = element.getAttribute('data-line')
+  if (attr !== null) {
+    const value = Number(attr)
+    if (Number.isFinite(value)) {
+      return value
+    }
+  }
+  for (const className of (element.getAttribute('class') ?? '').split(/\s+/)) {
+    const match = /^data-line-(\d+)$/.exec(className)
+    if (match) {
+      return Number(match[1])
+    }
+  }
+  return undefined
+}
+
+function collectLineAnchors(pane: HTMLElement): LineAnchor[] {
+  const anchors: LineAnchor[] = []
+  for (const element of pane.querySelectorAll<HTMLElement>(
+    '[class*="data-line-"], [data-line]',
+  )) {
+    const line = lineOfElement(element)
+    if (line !== undefined) {
+      anchors.push({ element, line })
+    }
+  }
+  return anchors
+}
+
+const leftLineAnchors = leftPane ? collectLineAnchors(leftPane) : []
+const rightLineAnchors = rightPane ? collectLineAnchors(rightPane) : []
+
+function lineAtTop(pane: HTMLElement, anchors: readonly LineAnchor[]) {
+  const paneTop = pane.getBoundingClientRect().top
+  let first: number | undefined
+  let best: number | undefined
+  for (const anchor of anchors) {
+    if (anchor.element.getClientRects().length === 0) {
+      continue
+    }
+    first ??= anchor.line
+    if (anchor.element.getBoundingClientRect().top - paneTop <= 1) {
+      best = anchor.line
+    }
+  }
+  return best ?? first
+}
+
+function anchorForLine(
+  anchors: readonly LineAnchor[],
+  line: number,
+): LineAnchor | undefined {
+  let previous: LineAnchor | undefined
+  for (const anchor of anchors) {
+    if (anchor.line >= line) {
+      return anchor
+    }
+    previous = anchor
+  }
+  return previous
+}
+
+function scrollPaneToLine(
+  side: 'left' | 'right',
+  pane: HTMLElement,
+  anchors: readonly LineAnchor[],
+  line: number,
+): boolean {
+  const anchor = anchorForLine(anchors, line)
+  if (!anchor || anchor.element.getClientRects().length === 0) {
+    return false
+  }
+  setScroll(side, pane, contentTop(pane, anchor.element) - 8)
+  return true
+}
+
+/**
+ * Maps the line recorded in one pane to the other pane through the source-line
+ * map. This is the fallback for an added/removed region, where the recorded
+ * line does not exist on the other side.
+ */
+function mapLineForSide(
+  side: 'left' | 'right',
+  line: number,
+): number | undefined {
+  const entries = settings.lineMap ?? []
+  if (entries.length === 0) {
+    return undefined
+  }
+  let best = entries[0]
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (const entry of entries) {
+    const value = side === 'left' ? entry.leftLine : entry.rightLine
+    const distance = Math.abs(value - line)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      best = entry
+    }
+  }
+  return side === 'left' ? best.rightLine : best.leftLine
+}
+
+function restoreScroll(): void {
+  const leftLine =
+    typeof settings.leftLine === 'number'
+      ? settings.leftLine
+      : typeof settings.rightLine === 'number'
+        ? mapLineForSide('right', settings.rightLine)
+        : undefined
+  const rightLine =
+    typeof settings.rightLine === 'number'
+      ? settings.rightLine
+      : typeof settings.leftLine === 'number'
+        ? mapLineForSide('left', settings.leftLine)
+        : undefined
+  let restored = false
+  if (leftPane && leftLine !== undefined) {
+    restored =
+      scrollPaneToLine('left', leftPane, leftLineAnchors, leftLine) || restored
+  }
+  if (rightPane && rightLine !== undefined) {
+    restored =
+      scrollPaneToLine('right', rightPane, rightLineAnchors, rightLine) ||
+      restored
+  }
+  if (
+    !restored &&
+    typeof settings.ratio === 'number' &&
+    leftPane &&
+    rightPane
+  ) {
+    const ratio = Math.min(1, Math.max(0, settings.ratio))
+    setScroll('left', leftPane, ratio * maxScroll(leftPane))
+    setScroll('right', rightPane, ratio * maxScroll(rightPane))
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Hunks: the navigation unit                                           */
+/* ------------------------------------------------------------------ */
+
+let hunks: string[] = []
+const hunkIndexById = new Map<string, number>()
+let currentHunk = -1
+
+function collectHunks(): void {
+  const seen = new Set<string>()
+  hunks = []
+  for (const pane of [leftPane, rightPane]) {
+    if (!pane) {
+      continue
+    }
+    for (const element of pane.querySelectorAll<HTMLElement>(
+      '[data-adoc-diff-hunk]',
+    )) {
+      const id = element.getAttribute('data-adoc-diff-hunk')
+      if (id !== null && !seen.has(id)) {
+        seen.add(id)
+        hunks.push(id)
+      }
+    }
+  }
+  hunkIndexById.clear()
+  hunks.forEach((id, index) => hunkIndexById.set(id, index))
+}
+
+function hunkTargets(id: string): HunkTarget[] {
+  const targets: HunkTarget[] = []
+  for (const pane of [leftPane, rightPane]) {
+    if (!pane) {
+      continue
+    }
+    const element = pane.querySelector<HTMLElement>(
+      `[data-adoc-diff-hunk="${id}"]`,
+    )
+    if (element) {
+      targets.push({ pane, element })
+    }
+  }
+  return targets
+}
+
+function topHunkIndex(pane: HTMLElement | null): number {
+  if (!pane) {
+    return -1
+  }
+  const paneTop = pane.getBoundingClientRect().top
+  let best = -1
+  for (const element of pane.querySelectorAll<HTMLElement>(
+    '[data-adoc-diff-hunk]',
+  )) {
+    if (element.getClientRects().length === 0) {
+      continue
+    }
+    const index = hunkIndexById.get(
+      element.getAttribute('data-adoc-diff-hunk') ?? '',
+    )
+    if (index === undefined) {
+      continue
+    }
+    if (element.getBoundingClientRect().top - paneTop <= 1) {
+      best = Math.max(best, index)
+    } else {
+      break
+    }
+  }
+  return best
+}
+
+function updateCurrentHunk(): void {
+  if (hunks.length === 0) {
+    currentHunk = -1
+    return
+  }
+  // The left pane owns most of the order; fall back to the right one for a hunk
+  // that only exists there.
+  const fromLeft = topHunkIndex(leftPane)
+  const index = fromLeft >= 0 ? fromLeft : topHunkIndex(rightPane)
+  // `-1` means "no hunk at or above the viewport yet": the status still shows
+  // `1 / N`, and the first click jumps to the first change instead of skipping
+  // it.
+  currentHunk = index >= 0 ? index : -1
+}
+
+function expandForHunk(id: string): void {
+  let changed = false
+  for (const target of hunkTargets(id)) {
+    const collapsed = target.element.closest<HTMLElement>(
+      '[data-adoc-diff-collapsed]',
+    )
+    if (!collapsed) {
+      continue
+    }
+    collapsed.classList.add('adoc-diff-expanded')
+    collapsed.title = text(
+      'collapseCollapse',
+      'Click to collapse deleted block',
+    )
+    changed = true
+  }
+  if (changed) {
+    alignment?.refresh()
+    post('setExpanded', { keys: alignment?.expandedKeys() ?? [] })
+  }
+}
+
+function flashElement(element: HTMLElement): void {
+  element.classList.add('adoc-diff-hunk-target')
+  window.setTimeout(() => {
+    element.classList.remove('adoc-diff-hunk-target')
+  }, 1600)
+}
+
+function flashHunk(id: string): void {
+  for (const target of hunkTargets(id)) {
+    flashElement(target.element)
+  }
+}
+
+function goToHunk(index: number): void {
+  if (hunks.length === 0) {
+    return
+  }
+  const normalized = ((index % hunks.length) + hunks.length) % hunks.length
+  currentHunk = normalized
+  const id = hunks[normalized]
+  expandForHunk(id)
+  const targets = hunkTargets(id)
+  for (const target of targets) {
+    const side = target.pane === leftPane ? 'left' : 'right'
+    setScroll(side, target.pane, contentTop(target.pane, target.element) - 8)
+  }
+  if (targets.length === 1) {
+    // The hunk exists on one side only (its gap target already carried another
+    // hunk): move the other pane by the nearest anchor.
+    syncFrom(targets[0].pane === leftPane ? 'left' : 'right')
+  }
+  flashHunk(id)
+  updateStatus()
+  // The programmatic scroll is ignored by the scroll handler; report the new
+  // reading position so a later live re-render restores the visited hunk.
+  scheduleScrollPost()
+}
+
+/* ------------------------------------------------------------------ */
+/* Status                                                              */
+/* ------------------------------------------------------------------ */
+
+function countNonVisual(): string {
+  const stats = settings.stats
+  const parts: string[] = []
+  const formatting = stats?.formattingChanges ?? 0
+  const link = stats?.linkChanges ?? 0
+  const id = stats?.idChanges ?? 0
+  const detail = text(
+    'statusNonVisual',
+    '{0} formatting / {1} link / {2} id changes',
+  )
+  if (formatting !== 0 || link !== 0 || id !== 0) {
+    parts.push(format(detail, [formatting, link, id]))
+  }
+  return parts.join(' · ')
+}
+
+function navigationSummary(count: number): string {
+  return format(
+    count === 1
+      ? text('statusNavigationSummaryOne', '1 navigation change')
+      : text('statusNavigationSummary', '{0} navigation changes'),
+    [count],
+  )
+}
+
+function statusTooltip(navigation: number): string {
+  const stats = settings.stats
+  if (!stats) {
+    return ''
+  }
+  const summary = format(
+    text(
+      'statusSummary',
+      '{0} change regions · +{1} added blocks · −{2} removed blocks',
+    ),
+    [stats.changes ?? 0, stats.addedBlocks ?? 0, stats.removedBlocks ?? 0],
+  )
+  const nonVisual = countNonVisual()
+  const navigationDetail =
+    navigation > 0 ? text('navigationChanged', 'Table of contents changed') : ''
+  const jump = text(
+    'statusJump',
+    'Click for the next change, Shift+click for the previous',
+  )
+  return [summary, nonVisual, navigationDetail, jump]
+    .filter((part) => part !== '')
+    .join('\n')
+}
+
+function updateStatus(): void {
+  if (!statusElement) {
+    return
+  }
+  const total = hunks.length
+  const stats = settings.stats
+  const visual = stats?.visualChanges ?? 0
+  const nonVisual = stats?.nonVisualChanges ?? 0
+  const navigation = stats?.navigationChanges ?? 0
+  if (total === 0) {
+    if (navigation > 0) {
+      statusElement.textContent = `${text('noVisualDifferences', 'No visual text differences')} — ${navigationSummary(navigation)}`
+      statusElement.className = 'diff-status diff-status-navigation'
+      statusElement.title = text(
+        'navigationChanged',
+        'Table of contents changed',
+      )
+      statusElement.removeAttribute('role')
+      statusElement.removeAttribute('tabindex')
+    } else {
+      statusElement.textContent = text('noDifferences', 'No differences')
+      statusElement.className = 'diff-status diff-status-clean'
+      statusElement.title = ''
+      statusElement.removeAttribute('role')
+      statusElement.removeAttribute('tabindex')
+    }
+    if (legendElement) {
+      legendElement.hidden = true
+    }
+    return
+  }
+
+  const index = currentHunk >= 0 ? currentHunk : 0
+  const busy = statusElement.classList.contains('diff-status-busy')
+  statusElement.className = 'diff-status diff-status-clickable'
+  if (busy) {
+    statusElement.classList.add('diff-status-busy')
+  }
+  if (visual === 0 && nonVisual > 0) {
+    const count = nonVisual + navigation
+    const summary = format(
+      count === 1
+        ? text('statusNonVisualSummaryOne', '1 change')
+        : text('statusNonVisualSummary', '{0} changes'),
+      [count],
+    )
+    statusElement.textContent = `${text('noVisualDifferences', 'No visual text differences')} — ${summary}`
+  } else {
+    // The navigator replaces the marker counters: it counts what the reviewer
+    // can actually visit, not the internal `adoc-diff-*` marks.
+    statusElement.textContent = `${index + 1} / ${total}`
+  }
+  statusElement.title = statusTooltip(navigation)
+  statusElement.setAttribute('role', 'button')
+  statusElement.tabIndex = 0
+  if (legendElement) {
+    legendElement.hidden =
+      settings.showStats === false || (visual === 0 && nonVisual > 0)
+  }
+}
+
+statusElement?.addEventListener('click', (event) => {
+  if (statusElement.classList.contains('diff-status-clean')) {
+    return
+  }
+  if (hunks.length === 0) {
+    return
+  }
+  const step = event.shiftKey ? -1 : 1
+  goToHunk(
+    currentHunk < 0 ? (step < 0 ? hunks.length - 1 : 0) : currentHunk + step,
+  )
+})
+
+statusElement?.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' && event.key !== ' ') {
+    return
+  }
+  event.preventDefault()
+  if (hunks.length === 0) {
+    return
+  }
+  goToHunk(currentHunk < 0 ? 0 : currentHunk + 1)
+})
+
+let busyTimer: number | undefined
+
+function setBusy(busy: boolean): void {
+  if (!statusElement) {
+    return
+  }
+  if (busy) {
+    statusElement.classList.add('diff-status-busy')
+    if (busyTimer === undefined) {
+      busyTimer = window.setTimeout(() => {
+        busyTimer = undefined
+        if (
+          statusElement.classList.contains('diff-status-busy') &&
+          statusElement.textContent === ''
+        ) {
+          statusElement.textContent = text('rendering', 'Rendering…')
+        }
+      }, 400)
+    }
+  } else {
+    if (busyTimer !== undefined) {
+      window.clearTimeout(busyTimer)
+      busyTimer = undefined
+    }
+    statusElement.classList.remove('diff-status-busy')
+    updateStatus()
+  }
+}
+
+function setError(message: string): void {
+  if (!statusElement) {
+    return
+  }
+  statusElement.textContent =
+    message || text('error', 'Unable to render the diff')
+  statusElement.className = 'diff-status diff-status-error'
+}
+
+/* ------------------------------------------------------------------ */
+/* Expanded state, labels and tooltips                                  */
+/* ------------------------------------------------------------------ */
+
+function applyExpandedState(): void {
+  const keys = new Set(settings.expanded ?? [])
+  if (keys.size === 0) {
+    return
+  }
+  for (const element of document.querySelectorAll<HTMLElement>(
+    '[data-adoc-diff-collapse-key]',
+  )) {
+    const key = element.getAttribute('data-adoc-diff-collapse-key') ?? ''
+    if (keys.has(key)) {
+      element.classList.add('adoc-diff-expanded')
+    }
+  }
+}
+
+function applyCollapseLabels(): void {
+  const label = text('collapseLabel', '{0} lines')
+  const labelWithExcerpt = text('collapseLabelWithExcerpt', '{0} lines · {1}')
+  for (const element of document.querySelectorAll<HTMLElement>(
+    '[data-adoc-diff-collapsed]',
+  )) {
+    const lines = element.getAttribute('data-adoc-diff-collapse-lines') ?? ''
+    const excerpt =
+      element.getAttribute('data-adoc-diff-collapse-excerpt') ?? ''
+    const value =
+      excerpt !== ''
+        ? format(labelWithExcerpt, [lines, excerpt])
+        : format(label, [lines])
+    element.setAttribute('data-adoc-diff-collapse-label', value)
+    element.title = element.classList.contains('adoc-diff-expanded')
+      ? text('collapseCollapse', 'Click to collapse deleted block')
+      : text('collapseExpand', 'Click to expand deleted block')
+  }
+}
+
+function applyMarkerTooltips(): void {
+  const titles: Record<string, string> = {
+    formatting: text('nonVisualFormatting', 'Formatting changed here'),
+    link: text('nonVisualLink', 'Link target changed here'),
+    id: text('nonVisualId', 'Anchor id changed here'),
+  }
+  for (const element of document.querySelectorAll<HTMLElement>(
+    '[data-adoc-diff-nonvisual]',
+  )) {
+    const kind =
+      element.getAttribute('data-adoc-diff-nonvisual') ?? 'formatting'
+    element.title = titles[kind] ?? titles.formatting
+  }
+  // The left-margin icon carries its explanation as a tooltip on the block
+  // itself: a pseudo-element cannot have its own title. Only the elements that
+  // actually draw the icon get it, so text blocks with word markers and code
+  // blocks with line markers stay tooltip-free.
+  const mediaTitle = text('mediaChanged', 'Changed image or diagram')
+  const blockTitle = text('blockChanged', 'Changed block')
+  for (const element of document.querySelectorAll<HTMLElement>(
+    '[data-adoc-diff-icon]',
+  )) {
+    if (element.title !== '') {
+      continue
+    }
+    element.title = element.hasAttribute('data-adoc-diff-media-changed')
+      ? mediaTitle
+      : blockTitle
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Swap                                                                 */
+/* ------------------------------------------------------------------ */
+
+function bindSwapButton(): void {
+  document
+    .getElementById('diff-swap')
+    ?.addEventListener('click', () => post('swap'))
+}
+
+/* ------------------------------------------------------------------ */
+/* Link interception                                                    */
+/* ------------------------------------------------------------------ */
+
+function findByIdInPane(
+  pane: HTMLElement,
+  id: string,
+): HTMLElement | undefined {
+  for (const element of pane.querySelectorAll<HTMLElement>('[id]')) {
+    if (element.id === id) {
+      return element
+    }
+  }
+  return undefined
+}
+
+function interceptLinks(): void {
+  for (const [pane, side] of [
+    [leftPane, 'left'],
+    [rightPane, 'right'],
+  ] as const) {
+    if (!pane) {
+      continue
+    }
+    pane.addEventListener('click', (event) => {
+      const target = event.target
+      if (!(target instanceof Element)) {
+        return
+      }
+      const anchor = target.closest<HTMLAnchorElement>('a[href]')
+      if (!anchor || !pane.contains(anchor)) {
+        return
+      }
+      const href = anchor.getAttribute('href') ?? ''
+      if (href.startsWith('#')) {
+        // An in-page link must scroll *this* pane. The document has two panes
+        // and duplicate ids, so the global `#id` lookup would scroll the left
+        // one from a click in the right one.
+        event.preventDefault()
+        let id = href.slice(1)
+        try {
+          id = decodeURIComponent(id)
+        } catch {
+          // A malformed escape sequence: use the raw fragment.
+        }
+        const destination = findByIdInPane(pane, id)
+        if (destination) {
+          setScroll(side, pane, contentTop(pane, destination) - 8)
+          syncFrom(side)
+        }
+        return
+      }
+      event.preventDefault()
+      post('openLink', { href, side })
+    })
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Startup                                                              */
+/* ------------------------------------------------------------------ */
+
+applyExpandedState()
+
+let alignment: AlignmentController | undefined
+if (settings.align !== false && leftPane && rightPane) {
+  alignment = new AlignmentController(leftPane, rightPane, {
+    strings,
+    onExpandedChange: (keys) => post('setExpanded', { keys }),
+  })
+}
+
+collectHunks()
+applyCollapseLabels()
+applyMarkerTooltips()
+bindSwapButton()
+interceptLinks()
+updateStatus()
+
+leftPane?.addEventListener('scroll', () => onScroll('left'), {
+  passive: true,
+})
+rightPane?.addEventListener('scroll', () => onScroll('right'), {
+  passive: true,
+})
+
+/* Scroll reporting is throttled: it crosses the webview IPC boundary, and the
+ * host only needs the reading position, not every frame. The scroll *sync*
+ * itself still runs on every event. */
+let postTimer: number | undefined
+let lastPostAt = 0
+
+function postScrollState(): void {
+  lastPostAt = performance.now()
+  post('didScroll', {
+    ratio: leftPane ? scrollRatio(leftPane) : 0,
+    leftLine: leftPane ? lineAtTop(leftPane, leftLineAnchors) : undefined,
+    rightLine: rightPane ? lineAtTop(rightPane, rightLineAnchors) : undefined,
+  })
+}
+
+function scheduleScrollPost(): void {
+  const elapsed = performance.now() - lastPostAt
+  if (elapsed >= 150) {
+    postScrollState()
+    return
+  }
+  if (postTimer !== undefined) {
+    return
+  }
+  postTimer = window.setTimeout(() => {
+    postTimer = undefined
+    postScrollState()
+  }, 150 - elapsed)
+}
+
+let statusTimer: number | undefined
+
+function scheduleStatusUpdate(): void {
+  if (statusTimer !== undefined) {
+    return
+  }
+  statusTimer = window.setTimeout(() => {
+    statusTimer = undefined
+    updateCurrentHunk()
+    updateStatus()
+  }, 120)
 }
 
 function onScroll(side: 'left' | 'right'): void {
@@ -189,157 +908,8 @@ function onScroll(side: 'left' | 'right'): void {
   // the synchronization only reads `scrollTop`/`scrollHeight` and writes one
   // `scrollTop`, so run it right away: no extra frame of latency.
   syncFrom(side)
-}
-
-leftPane?.addEventListener('scroll', () => onScroll('left'), {
-  passive: true,
-})
-rightPane?.addEventListener('scroll', () => onScroll('right'), {
-  passive: true,
-})
-
-document
-  .getElementById('diff-swap')
-  ?.addEventListener('click', () => post('swap'))
-
-const CHANGE_SELECTOR = [
-  '.adoc-diff-block-ins',
-  '.adoc-diff-block-del',
-  '.adoc-diff-block-changed',
-  '.adoc-diff-table-ins',
-  '.adoc-diff-table-del',
-  '.adoc-diff-cell-changed',
-  '.adoc-diff-word-ins',
-  '.adoc-diff-word-del',
-  '.adoc-diff-code-line-add',
-  '.adoc-diff-code-line-del',
-  '.adoc-diff-code-line-changed',
-  'tr.adoc-diff-row-ins',
-  'tr.adoc-diff-row-del',
-  'tr.adoc-diff-row-gap',
-].join(',')
-
-function contentTop(pane: HTMLElement, element: Element): number {
-  return (
-    element.getBoundingClientRect().top -
-    pane.getBoundingClientRect().top +
-    pane.scrollTop
-  )
-}
-
-function firstChange(): void {
-  if (!leftPane || !rightPane) {
-    return
-  }
-  // A change can be present only on one side (an added or removed block), so
-  // look at both panes and jump to the earliest one in document order.
-  let target:
-    | { pane: HTMLElement; element: HTMLElement; top: number }
-    | undefined
-  for (const pane of [leftPane, rightPane]) {
-    const element = pane.querySelector<HTMLElement>(CHANGE_SELECTOR)
-    if (!element) {
-      continue
-    }
-    const top = contentTop(pane, element)
-    if (!target || top < target.top) {
-      target = { pane, element, top }
-    }
-  }
-  if (!target) {
-    return
-  }
-  const anchor =
-    target.element.closest<HTMLElement>('[data-adoc-diff-anchor]') ??
-    target.element
-  const id = anchor.getAttribute('data-adoc-diff-anchor')
-  for (const [pane, side] of [
-    [leftPane, 'left'],
-    [rightPane, 'right'],
-  ] as const) {
-    const anchorElement =
-      pane === target.pane
-        ? anchor
-        : id
-          ? pane.querySelector<HTMLElement>(`[data-adoc-diff-anchor="${id}"]`)
-          : null
-    if (!anchorElement) {
-      continue
-    }
-    const offset =
-      anchorElement.getBoundingClientRect().top -
-      pane.getBoundingClientRect().top
-    setScroll(side, pane, pane.scrollTop + offset)
-  }
-}
-
-statusElement?.addEventListener('click', () => {
-  if (statusElement.classList.contains('diff-status-clean')) {
-    return
-  }
-  firstChange()
-})
-
-function updateStatus(): void {
-  if (!statusElement) {
-    return
-  }
-  const stats = settings.stats
-  const total =
-    (stats?.addedBlocks ?? 0) +
-    (stats?.removedBlocks ?? 0) +
-    (stats?.changedBlocks ?? 0) +
-    (stats?.changedTables ?? 0) +
-    (stats?.changedCells ?? 0)
-  if (total === 0) {
-    statusElement.textContent = strings.noDifferences ?? 'No differences'
-    statusElement.className = 'diff-status diff-status-clean'
-    statusElement.title = ''
-    if (legendElement) {
-      legendElement.hidden = true
-    }
-  } else if (settings.showStats === false) {
-    statusElement.textContent = ''
-    statusElement.className = 'diff-status'
-    statusElement.title = ''
-    if (legendElement) {
-      legendElement.hidden = true
-    }
-  } else {
-    const added = stats?.addedBlocks ?? 0
-    const removed = stats?.removedBlocks ?? 0
-    const changed =
-      (stats?.changedBlocks ?? 0) +
-      (stats?.changedTables ?? 0) +
-      (stats?.changedCells ?? 0)
-    statusElement.textContent = `+${added} −${removed} ~${changed}`
-    statusElement.className = 'diff-status diff-status-clickable'
-    statusElement.title = `${added} added, ${removed} removed, ${changed} changed — click to jump to the first change`
-    if (legendElement) {
-      legendElement.hidden = false
-    }
-  }
-}
-
-function setBusy(busy: boolean): void {
-  if (!statusElement) {
-    return
-  }
-  if (busy) {
-    statusElement.textContent = strings.rendering ?? 'Rendering…'
-    statusElement.className = 'diff-status diff-status-busy'
-  } else {
-    updateStatus()
-  }
-}
-
-function setError(message: string): void {
-  if (!statusElement) {
-    return
-  }
-  statusElement.textContent =
-    message || strings.error || 'Unable to render the diff'
-  statusElement.className = 'diff-status diff-status-error'
+  scheduleScrollPost()
+  scheduleStatusUpdate()
 }
 
 window.addEventListener('message', (event) => {
@@ -358,13 +928,21 @@ window.addEventListener('message', (event) => {
   }
 })
 
-updateStatus()
+const startAlignment = (): void => {
+  alignment?.start()
+}
 
-// Restore the last position after a re-render.
-if (leftPane && rightPane && typeof settings.ratio === 'number') {
-  const ratio = Math.min(1, Math.max(0, settings.ratio))
+if (settings.align === false || !alignment) {
+  restoreScroll()
+  updateCurrentHunk()
+  updateStatus()
+} else {
+  // Restore before the first alignment pass so the controller measures from the
+  // position the reader left, not from the top.
   requestAnimationFrame(() => {
-    setScroll('left', leftPane, ratio * maxScroll(leftPane))
-    setScroll('right', rightPane, ratio * maxScroll(rightPane))
+    restoreScroll()
+    startAlignment()
+    updateCurrentHunk()
+    updateStatus()
   })
 }

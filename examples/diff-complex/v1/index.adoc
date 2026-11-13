@@ -1,0 +1,82 @@
+= Product handbook
+:toc:
+:imagesdir: ../../images
+
+== Overview
+
+The product runs on Linux, macOS and Windows.
+It also runs in the browser.
+
+*Important:* the overview is short.
+
+* Linux
+* macOS
+* Windows
+* Web
+
+[NOTE]
+====
+Read the security section first.
+====
+
+== Configuration
+
+The configuration file lists every supported option.
+
+[cols="1,1,1,1"]
+|===
+|Name |Count |Status |Owner
+
+|alpha |1 |ready |ann
+|beta |2 |ready |bob
+|gamma |3 |draft |carl
+|delta |4 |ready |dina
+|===
+
+== Examples
+
+[source,ruby]
+----
+def configure(path)
+  options = parse(path)
+  validate(options)
+  apply(options)
+  log("done")
+  return options
+end
+----
+
+.A diagram
+image::document.svg[Diagram,200]
+
+[#deprecated]
+== Deprecated options
+
+[source,ruby]
+----
+# 20 lines are hidden when this section is deleted.
+puts "line 1"
+puts "line 2"
+puts "line 3"
+puts "line 4"
+puts "line 5"
+puts "line 6"
+puts "line 7"
+puts "line 8"
+puts "line 9"
+puts "line 10"
+puts "line 11"
+puts "line 12"
+puts "line 13"
+puts "line 14"
+puts "line 15"
+puts "line 16"
+puts "line 17"
+puts "line 18"
+puts "line 19"
+puts "line 20"
+----
+
+== Appendix
+
+Read https://example.com/v1[the guide] and contact the maintainers.

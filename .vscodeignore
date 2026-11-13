@@ -18,6 +18,8 @@
 !media/
 !package.json
 !package.nls*.json
+# Runtime localization bundles, loaded through the "l10n" field of package.json.
+!l10n/
 !en.json
 !README.md
 !CHANGELOG.md

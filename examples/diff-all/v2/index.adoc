@@ -1,0 +1,282 @@
+// Diff showcase — new version.
+//
+// This document and ../../v1/index.adoc have the same structure and differ in
+// every block, so a rendered comparison exercises every kind of marker:
+// word/block additions and removals, formatting-only, link-only and id-only
+// changes, changed images, Mermaid/PlantUML diagrams, formulas, table cells,
+// rows, columns and spans, code lines and callouts, admonitions, quotes,
+// lists, gaps and a collapsed deletion.
+//
+// The three "Policy" sections are the only intentional exception: they are
+// identical on both sides and are only reordered, to exercise move detection.
+= Diff showcase: new version
+:toc: left
+:toclevels: 3
+:icons: font
+:experimental:
+:imagesdir: ../../images
+:stem: latexmath
+:source-highlighter: highlight.js
+:author: New Author
+:revnumber: 2.0
+:revdate: 2026-02-02
+
+== Overview and goals
+
+The product runs on Linux, macOS and Windows, and on ARM servers.
+It also runs in the browser.
+
+[.lead]
+The new overview keeps three sentences.
+A sentence that exists only in the new version.
+It also mentions the mobile application.
+
+.Supported platforms (new)
+* Linux
+* Windows Server
+* Web
+* Android
+
+* one
+* two
+* three
+* four
+
+[start=2]
+.Steps (new)
+. install
+. configure
+. verify
+
+New term:: New definition.
+Shared term:: Changed definition.
+
+* [ ] Reviewed by the new team
+* [x] Published on the new site
+
+[WARNING]
+====
+New warning body.
+====
+
+[CAUTION]
+====
+New caution body.
+====
+
+[IMPORTANT]
+====
+New important body.
+====
+
+== Formatting and links
+
+_Formatted label_ stays the same length.
+
+The new command is `make new`.
+
+Read the https://example.com/new[guide] before you start.
+
+[[new-anchor]]
+This paragraph keeps its text but changes its anchor.
+
+A footnote reference.footnote:[The new footnote text.]
+
+Press kbd:[Ctrl+S] and choose menu:File[Open], then btn:[New button].
+
+icon:star[] New icon label.
+
+== Diagrams, media and math
+
+.A diagram (new title)
+image::document-v2.svg[New diagram,300]
+
+Inline image: the icon image:document-v2.svg[new icon] is new.
+
+.Quotation (new attribution)
+[quote, New Author, New Book]
+____
+New quote text.
+____
+
+[mermaid]
+----
+graph TD; A-->D; D-->C;
+----
+
+[plantuml]
+----
+Alice -> Bob: new message
+Bob -> Alice: reply
+----
+
+Inline math stem:[E = m c^3] and a block formula.
+
+[stem]
+++++
+\[ a^2 + b^2 = d^2 \]
+++++
+
+== Tables
+
+.Table of services (new caption)
+[cols="1,1,1,1"]
+|===
+|Name |Count |Status |Owner
+
+|alpha |2 |ready |ann
+|delta |4 |new |dan
+|gamma |3 |published |carl
+|===
+
+[cols="1,1,1,1",width="80%"]
+|===
+|Name |Severity |Status |Owner
+
+|alpha |high |ready |ann
+|beta |low |draft |bob
+|===
+
+[cols="1,1,1"]
+|===
+|A |B |C
+
+|old span
+2+|D
+
+|E |F |G
+|===
+
+[cols="1,1"]
+|===
+|Name |Value
+
+|keep |1
+|also keep |3
+|===
+
+== Code and literals
+
+[source,ruby]
+----
+def build(path, mode)
+  data = read(path)
+  validate(data, mode)
+  raise "empty" if data.empty?
+  write(path, data)
+end
+----
+
+[source,ruby]
+----
+config = load(path) # <1>
+apply(config, strict: true) # <2>
+log("applied") # <3>
+----
+<1> Loads the new configuration.
+<2> Applies the new configuration strictly.
+<3> Logs the new configuration.
+
+[source,text]
+----
+first line
+last line
+----
+
+.New listing
+----
+new plain text
+second new line
+----
+
+.New literal
+....
+New literal line one.
+New literal line two.
+New literal line three.
+....
+
+== Other blocks
+
+[example]
+====
+New example block text.
+====
+
+[sidebar]
+****
+New sidebar text.
+****
+
+[open]
+--
+New open block text.
+--
+
+[verse, New Poet, New Poem]
+____
+New verse line one +
+New verse line two
+____
+
+A line with a hard break +
+and the new continuation.
+
+++++
+<span class="badge">new badge</span>
+++++
+
+'''
+
+A paragraph after the new thematic break.
+
+== Policy C
+
+The policy text is identical on both sides.
+
+* keep this rule
+* and this rule
+
+== Policy B
+
+The policy text is identical on both sides.
+
+* keep this rule
+* and this rule
+
+== Policy A
+
+The policy text is identical on both sides.
+
+* keep this rule
+* and this rule
+
+== New options
+
+The new release documents options that did not exist before.
+
+[source,text]
+----
+new.1 = true
+new.2 = true
+new.3 = true
+new.4 = true
+new.5 = true
+new.6 = true
+new.7 = true
+new.8 = true
+new.9 = true
+new.10 = true
+new.11 = true
+new.12 = true
+----
+
+.Final new paragraph
+This paragraph and the long listing above appear only in the new version.
+
+== Appendix
+
+A final new paragraph with a xref to <<_policy_c>> and a footnote.footnote:[New appendix note.]
+
+[.new-role]
+A paragraph with the new role.

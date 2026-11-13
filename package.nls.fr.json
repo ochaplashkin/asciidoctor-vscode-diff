@@ -22,7 +22,7 @@
   "asciidoc.diff.codeBlocks.line": "Comparer le code ligne par ligne, avec une gouttière `+`/`−`/`~`",
   "asciidoc.diff.codeBlocks.block": "Comparer un bloc de code dans son ensemble",
   "asciidoc.diff.collapseLines.desc": "Les blocs supprimés plus longs que ce nombre de lignes sont réduits en une bande `−N`. Les blocs plus courts restent visibles.",
-  "asciidoc.diff.showStats.desc": "Afficher le résumé `+ajouté −supprimé ~modifié` et la légende des couleurs dans l'en-tête de comparaison.",
+  "asciidoc.diff.showStats.desc": "Afficher la légende des couleurs dans l'en-tête de comparaison. Le navigateur de modifications est toujours disponible, et le détail `+ajouté −supprimé ~modifié` se trouve dans son infobulle.",
   "asciidoc.editor.enableDrop.desc": "Active le glisser/déposer d'images. Maintenir la touche Shift appuyée afin de déposer un fichier dans l'éditeur de texte.",
   "asciidoc.editor.drop.copyIntoWorkspace.desc": "Détermine si le dépôt d'une image qui n'est pas déjà accessible depuis `imagesdir` (ou le module Antora courant) propose de la copier dans le projet.",
   "asciidoc.editor.drop.copyIntoWorkspace.smart": "Proposer de copier l'image dans le projet lorsqu'elle ne peut pas être liée proprement depuis son emplacement actuel.",

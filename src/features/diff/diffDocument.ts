@@ -42,10 +42,57 @@ import { findFirstElementByTag, findPreviewRoot } from './renderDiff.js'
 export interface DiffDocumentStrings {
   readonly rendering: string
   readonly noDifferences: string
+  /** "No visual text differences" (the text is the same, formatting/link/id is not). */
+  readonly noVisualDifferences: string
+  /** Short count suffix for the non-visual status, e.g. "3 changes". */
+  readonly statusNonVisualSummary: string
+  readonly statusNonVisualSummaryOne: string
+  /** Count suffix for a TOC-only status. */
+  readonly statusNavigationSummary: string
+  readonly statusNavigationSummaryOne: string
+  /** Tooltip of the TOC navigation badge. */
+  readonly navigationChanged: string
   readonly error: string
   readonly old: string
   readonly new: string
   readonly swap: string
+  /** Non-visual badge tooltips. */
+  readonly nonVisualFormatting: string
+  readonly nonVisualLink: string
+  readonly nonVisualId: string
+  /** Tooltip of the left-margin icon of a changed block or media element. */
+  readonly blockChanged: string
+  readonly mediaChanged: string
+  /** Header warning when the two previews use different document shells. */
+  readonly shellDiffers: string
+  /** Status tooltip: added/removed/changed/non-visual detail. */
+  readonly statusSummary: string
+  readonly statusNonVisual: string
+  readonly statusJump: string
+  /** Collapsed deleted block. */
+  readonly collapseExpand: string
+  readonly collapseCollapse: string
+  readonly collapseLabel: string
+  readonly collapseLabelWithExcerpt: string
+  /** Gap labels. */
+  readonly gapAddedBlocks: string
+  readonly gapAddedTable: string
+  readonly gapAddedLines: string
+  readonly gapRemovedBlocks: string
+  readonly gapRemovedTable: string
+  readonly gapRemovedLines: string
+  readonly gapChangedBlocks: string
+  readonly gapChangedTable: string
+  readonly gapChangedLines: string
+  readonly gapAddedBlock: string
+  readonly gapAddedTableRow: string
+  readonly gapAddedLine: string
+  readonly gapRemovedBlock: string
+  readonly gapRemovedTableRow: string
+  readonly gapRemovedLine: string
+  readonly gapChangedBlock: string
+  readonly gapChangedTableRow: string
+  readonly gapChangedLine: string
 }
 
 export interface DiffDocumentOptions {
@@ -59,12 +106,20 @@ export interface DiffDocumentOptions {
   readonly diffContentCss: string
   readonly leftTitle: string
   readonly rightTitle: string
+  /** Full path of each side, shown on hover. */
+  readonly leftTitleTooltip?: string
+  readonly rightTitleTooltip?: string
   readonly strings: DiffDocumentStrings
   readonly lineMap: readonly DiffLineMapEntry[]
   readonly leftLineCount: number
   readonly rightLineCount: number
   /** Fraction of the scrollable range to restore after load (0..1). */
   readonly ratio?: number
+  /** Top source line of each pane at the last scroll, for an exact restore. */
+  readonly leftLine?: number
+  readonly rightLine?: number
+  /** Collapse keys of deleted blocks the reader expanded. */
+  readonly expanded?: readonly string[]
   readonly version: number
   readonly stats: DiffStats
   /** Presentation options; clients should pass the same object as `renderDiff`. */
@@ -88,6 +143,11 @@ export function buildDiffDocument(options: DiffDocumentOptions): string {
   // the left one (the combined document only keeps the left `<base>`).
   resolveRelativeUrls(left.root, left.baseHref)
   resolveRelativeUrls(right.root, right.baseHref)
+  // The generated table of contents is navigation, not content: it is compared
+  // (a TOC-only change is still reported in the status) but it must not take a
+  // column away from the rendered text in either pane.
+  removeGeneratedToc(left.root)
+  removeGeneratedToc(right.root)
   // Allow the scripts that come from the right document in the left CSP.
   allowNonceInCsp(left.head, right.nonce)
 
@@ -103,14 +163,17 @@ export function buildDiffDocument(options: DiffDocumentOptions): string {
   const previewStyle = left.body
     ? getAttribute(left.body, 'data-preview-style')
     : undefined
+  // The combined document can only have one `<body>`, and the shell classes
+  // (`book`/`article`, `toc2`, `toc-left`, the preview style) drive rules that
+  // apply to both panes. They come from the left document; when the two shells
+  // differ, the right pane is rendered in a shell it does not own. Scoping the
+  // shell rules per pane is not possible without rewriting the preview
+  // stylesheets, so the header warns instead of silently misrendering.
+  const shellDiffers = previewShellsDiffer(left, right)
   const trailingHtml = serializeMergedTrailing(left, right)
 
   const totalChanges =
-    options.stats.addedBlocks +
-    options.stats.removedBlocks +
-    options.stats.changedBlocks +
-    options.stats.changedTables +
-    options.stats.changedCells
+    options.stats.changes + (options.stats.navigationChanges ?? 0)
   const statusText =
     totalChanges === 0 ? escapeHtml(options.strings.noDifferences) : ''
   const statusClass =
@@ -125,6 +188,9 @@ export function buildDiffDocument(options: DiffDocumentOptions): string {
       leftLineCount: options.leftLineCount,
       rightLineCount: options.rightLineCount,
       ratio: options.ratio,
+      leftLine: options.leftLine,
+      rightLine: options.rightLine,
+      expanded: options.expanded ?? [],
       strings: options.strings,
       stats: options.stats,
       version: options.version,
@@ -138,6 +204,9 @@ export function buildDiffDocument(options: DiffDocumentOptions): string {
     previewStyle !== undefined
       ? ` data-preview-style="${escapeAttribute(previewStyle)}"`
       : ''
+  const shellWarning = shellDiffers
+    ? `<div id="diff-shell-warning" class="diff-shell-warning" role="img" title="${escapeAttribute(options.strings.shellDiffers)}" aria-label="${escapeAttribute(options.strings.shellDiffers)}">!</div>`
+    : ''
 
   return `<!DOCTYPE html>
 <html${htmlStyleAttribute}>
@@ -153,20 +222,22 @@ ${headHtml}
   <header id="diff-header">
     <div class="diff-pane-title">
       <span class="diff-badge diff-badge-old">${escapeHtml(options.strings.old)}</span>
-      <span id="diff-left-title" class="diff-title">${escapeHtml(options.leftTitle)}</span>
+      <span id="diff-left-title" class="diff-title"${titleAttribute(options.leftTitleTooltip)}>${escapeHtml(options.leftTitle)}</span>
     </div>
     <div id="diff-status" class="${statusClass}">${statusText}</div>
     <div id="diff-legend" class="diff-legend" aria-hidden="true">
       <span class="diff-legend-item diff-legend-add">+</span>
       <span class="diff-legend-item diff-legend-del">−</span>
       <span class="diff-legend-item diff-legend-change">~</span>
+      <span class="diff-legend-item diff-legend-moved">↕</span>
     </div>
+    ${shellWarning}
     <button id="diff-swap" class="diff-swap" type="button" title="${escapeHtml(options.strings.swap)}" aria-label="${escapeHtml(options.strings.swap)}">
       <span class="diff-swap-icon" aria-hidden="true">⇄</span><span class="diff-swap-label">${escapeHtml(options.strings.swap)}</span>
     </button>
     <div class="diff-pane-title diff-pane-title-right">
       <span class="diff-badge diff-badge-new">${escapeHtml(options.strings.new)}</span>
-      <span id="diff-right-title" class="diff-title">${escapeHtml(options.rightTitle)}</span>
+      <span id="diff-right-title" class="diff-title"${titleAttribute(options.rightTitleTooltip)}>${escapeHtml(options.rightTitle)}</span>
     </div>
   </header>
   <main id="diff-panes">
@@ -180,6 +251,29 @@ ${trailingHtml}
 </html>`
 }
 
+/**
+ * Removes the generated `#toc` element from a preview root. The TOC already
+ * took part in `renderDiff` (which reports a TOC-only change), but the
+ * comparison panes are narrow: a pinned TOC would reserve 15–20em of width and
+ * make the content wrap earlier than in a standalone preview.
+ */
+function removeGeneratedToc(root: Element): void {
+  const visit = (element: Element): void => {
+    for (let index = element.childNodes.length - 1; index >= 0; index--) {
+      const child = element.childNodes[index]
+      if (!isElement(child)) {
+        continue
+      }
+      if (getAttribute(child, 'id') === 'toc') {
+        element.childNodes.splice(index, 1)
+        continue
+      }
+      visit(child)
+    }
+  }
+  visit(root)
+}
+
 function parsePreview(html: string): ParsedPreview {
   const doc = parse(html)
   return {
@@ -190,6 +284,61 @@ function parsePreview(html: string): ParsedPreview {
     baseHref: readBaseHref(doc),
     nonce: extractNonce(html),
   }
+}
+
+interface PreviewShell {
+  readonly classes: string
+  readonly fingerprint: string | undefined
+  readonly style: string | undefined
+}
+
+/**
+ * The document-driven shell of a preview: the `<body>` classes and preview
+ * style, plus the `data-shell` fingerprint the converter computes over them and
+ * the stylesheets it loads.
+ */
+function readShell(preview: ParsedPreview): PreviewShell {
+  const body = preview.body
+  return {
+    classes: normalizeShellClasses(
+      body ? (getAttribute(body, 'class') ?? '') : '',
+    ),
+    fingerprint: body ? getAttribute(body, 'data-shell') : undefined,
+    style: body ? getAttribute(body, 'data-preview-style') : undefined,
+  }
+}
+
+function normalizeShellClasses(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter((name) => name !== '' && !/^data-h-[0-9a-z]+$/.test(name))
+    .sort()
+    .join(' ')
+}
+
+/**
+ * Whether the two documents were rendered with different shells. The `data-shell`
+ * fingerprint covers the body classes, the loaded stylesheets, the docinfo and
+ * the math/diagram bootstrap, so it is the most reliable signal when the two
+ * previews come from the converter. The body classes and the preview style are
+ * the fallback for synthetic HTML.
+ */
+function previewShellsDiffer(
+  left: ParsedPreview,
+  right: ParsedPreview,
+): boolean {
+  const leftShell = readShell(left)
+  const rightShell = readShell(right)
+  if (
+    leftShell.fingerprint !== undefined &&
+    rightShell.fingerprint !== undefined
+  ) {
+    return leftShell.fingerprint !== rightShell.fingerprint
+  }
+  return (
+    leftShell.classes !== rightShell.classes ||
+    leftShell.style !== rightShell.style
+  )
 }
 
 function readBaseHref(doc: Document): string | undefined {
@@ -364,11 +513,18 @@ function allowNonceInCsp(
 }
 
 const URL_ATTRIBUTES = new Set(['src', 'href', 'data', 'poster'])
+const LINK_ELEMENTS = new Set(['a', 'area'])
 
 /**
  * Resolves the relative URL attributes of a subtree against the document's own
  * base, so the right pane loads its resources from the right place even though
  * the combined document keeps the left `<base>`.
+ *
+ * Link targets (`<a href>`, `<area href>`) are left untouched: the diff client
+ * intercepts the click and sends the original href to the host, which resolves
+ * it against the source document of the pane. Resolving it here would turn it
+ * into a `vscode-webview-resource:` URI that the host cannot map back to a
+ * file.
  */
 function resolveRelativeUrls(
   root: Element,
@@ -380,6 +536,12 @@ function resolveRelativeUrls(
   const visit = (element: Element): void => {
     for (const attr of element.attrs) {
       if (!URL_ATTRIBUTES.has(attr.name.toLowerCase())) {
+        continue
+      }
+      if (
+        attr.name.toLowerCase() === 'href' &&
+        LINK_ELEMENTS.has(element.tagName)
+      ) {
         continue
       }
       if (isRelativeUrl(attr.value)) {
@@ -425,4 +587,10 @@ function escapeHtml(value: string): string {
 
 function escapeAttribute(value: string): string {
   return escapeHtml(value)
+}
+
+function titleAttribute(value: string | undefined): string {
+  return value !== undefined && value !== ''
+    ? ` title="${escapeAttribute(value)}"`
+    : ''
 }

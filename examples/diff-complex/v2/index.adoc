@@ -1,0 +1,65 @@
+= Product handbook
+:toc:
+:imagesdir: ../../images
+
+== Overview
+
+The product runs on Linux, macOS and Windows.
+It also runs in any modern browser.
+
+_Important:_ the overview is short.
+
+* Linux
+* macOS
+* Windows
+* BSD
+* Web
+
+[NOTE]
+====
+Read the security section and the appendix first.
+====
+
+== Configuration
+
+A new paragraph was inserted in the middle of this section.
+
+The configuration file lists all supported options.
+
+[cols="1,1,1,1,1"]
+|===
+|Name |Count |Severity |Status |Owner
+
+|alpha |1 |high |ready |ann
+|beta |2 |medium |ready |bob
+|gamma |3 |low |published |carl
+|epsilon |5 |high |new |eve
+|delta |4 |high |ready |dina
+|===
+
+== Examples
+
+[source,ruby]
+----
+def configure(path)
+  options = parse(path)
+  validate!(options)
+  apply(options)
+end
+
+puts "a new listing block"
+----
+
+.A diagram
+image::document-v2.svg[Diagram,200]
+
+[#legacy]
+== Legacy options
+
+The same content, but its anchor id changed from `deprecated` to `legacy`.
+This section keeps the deleted-block test in the manual fixture.
+Read https://example.com/v2[the guide] and contact the maintainers.
+
+== Appendix
+
+Read https://example.com/v2[the guide] and contact the maintainers.

@@ -52,6 +52,15 @@ async function main() {
       readFileSync(path.join(projectRootPath, 'package.json'), 'utf-8'),
     )
 
+    // VS Code is started through its Electron binary. When this process itself
+    // runs inside Electron (or a wrapper exports it), the inherited
+    // `ELECTRON_RUN_AS_NODE` variable makes that binary behave as plain Node:
+    // it treats the first launch argument (the test workspace) as the script to
+    // run and fails with `Cannot find module .../test-workspace` before the
+    // extension host is even loaded. The test host is a real VS Code window, so
+    // the variable must not leak into it.
+    delete process.env.ELECTRON_RUN_AS_NODE
+
     await runTests({
       extensionDevelopmentPath,
       extensionTestsPath,
@@ -61,7 +70,8 @@ async function main() {
         ASCIIDOC_EXTENSION_ID: `${packageJson.publisher}.${packageJson.name}`,
       },
     })
-  } catch (_err) {
+  } catch (error) {
+    console.error(error)
     process.exit(1)
   }
 }

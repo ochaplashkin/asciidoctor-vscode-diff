@@ -14,6 +14,8 @@
 export type AlignSide = 'left' | 'right'
 export type AlignGapKind = 'ins' | 'del' | 'mixed' | 'residual'
 export type AlignGapPosition = 'before' | 'after'
+/** What the missing content is, for the gap label. */
+export type AlignGapObject = 'blocks' | 'table' | 'lines'
 
 export interface AlignInterval {
   /** Distance between the two anchors on the left, in CSS pixels. */
@@ -28,6 +30,12 @@ export interface AlignInterval {
   readonly rightPosition: AlignGapPosition
   readonly leftKind?: AlignGapKind
   readonly rightKind?: AlignGapKind
+  /** How many blocks (or table rows) are missing, for the gap label. */
+  readonly leftCount?: number
+  readonly rightCount?: number
+  /** Whether the missing content is a table, for the gap label. */
+  readonly leftObject?: AlignGapObject
+  readonly rightObject?: AlignGapObject
 }
 
 export interface AlignSpace {
@@ -35,6 +43,8 @@ export interface AlignSpace {
   readonly position: AlignGapPosition
   readonly kind: AlignGapKind
   readonly height: number
+  readonly count?: number
+  readonly object?: AlignGapObject
 }
 
 /** Sub-pixel differences are not worth a gap. */
@@ -61,6 +71,7 @@ export function computeSpaces(
           position: interval.leftPosition,
           kind: interval.leftKind ?? 'residual',
           height: delta,
+          ...gapLabel(interval.leftCount, interval.leftObject),
         })
       } else {
         spaces.push({
@@ -77,6 +88,7 @@ export function computeSpaces(
           position: interval.rightPosition,
           kind: interval.rightKind ?? 'residual',
           height: -delta,
+          ...gapLabel(interval.rightCount, interval.rightObject),
         })
       } else {
         spaces.push({
@@ -89,4 +101,14 @@ export function computeSpaces(
     }
   }
   return spaces
+}
+
+function gapLabel(
+  count: number | undefined,
+  object: AlignGapObject | undefined,
+): { count?: number; object?: AlignGapObject } {
+  return {
+    ...(count !== undefined ? { count } : {}),
+    ...(object !== undefined ? { object } : {}),
+  }
 }

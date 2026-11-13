@@ -1,7 +1,15 @@
 /* Diff highlight rules, injected into each child preview document.
- * Colors come from the VS Code diff editor theme variables with a fallback, and
- * only the background/outline are changed: never font, weight, color or
- * text-decoration. */
+ *
+ * Added content keeps the green highlight and removed content keeps the red
+ * one. The empty space a change reserves on the other side (the gap, the
+ * placeholder row/column or the code gap line) is neutral gray: the pane that
+ * does not contain the content shows the layout shift without repeating the
+ * add/remove color. Only the background/outline are changed: never font,
+ * weight, color or text-decoration. */
+:root {
+  --adoc-diff-gap-neutral-tint: rgba(128, 128, 128, 0.1);
+  --adoc-diff-gap-neutral-border: rgba(128, 128, 128, 0.4);
+}
 
 /* Alignment boundaries: zero-height anchors at the start/end of each preview.
  * They take part in the client measurement but must not affect the layout. */
@@ -14,80 +22,36 @@
   overflow: hidden;
 }
 
-/* A gap is drawn on the block that carries the reserved space: `::before` for
- * a margin-top gap (the space is above the block) and `::after` for a
- * padding-bottom gap (the space is below the block). Only the background and a
- * dashed outline are added; the block's text/style are untouched. */
-.adoc-diff-gap-top {
-  position: relative;
-}
-
-.adoc-diff-gap-top::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: var(--adoc-diff-gap-top-offset, 0px);
-  height: var(--adoc-diff-gap-top-h, 0px);
-  box-sizing: border-box;
-  background: var(--adoc-diff-gap-tint, transparent);
-  border: 1px dashed var(--adoc-diff-gap-border, transparent);
-  border-radius: 2px;
-  pointer-events: none;
-}
-
+/* A gap is drawn on the block that carries the reserved space. The tint and
+ * the label are an overlay created by the client (`media/diff.css` /
+ * `diff-align.ts`), not a pseudo-element on the block: the preview stylesheet
+ * already uses `::before`/`::after` on containers such as `#content` for its
+ * clearfix, which would swallow the gap label or the whole gap. */
+.adoc-diff-gap-top,
 .adoc-diff-gap-bottom {
   position: relative;
 }
 
-.adoc-diff-gap-bottom::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: var(--adoc-diff-gap-bottom-offset, 0px);
-  height: var(--adoc-diff-gap-bottom-h, 0px);
-  box-sizing: border-box;
-  background: var(--adoc-diff-gap-tint, transparent);
-  border: 1px dashed var(--adoc-diff-gap-border, transparent);
-  border-radius: 2px;
-  pointer-events: none;
-}
-
 /* Structural table placeholders: an empty column or row on the side that does
  * not have it. The tint comes from the `adoc-diff-gap-ins/del` class, so the
- * same green/red semantics as block gaps applies. */
+ * same neutral semantics as block gaps applies. */
 .adoc-diff-col-gap,
 tr.adoc-diff-row-gap > td,
 tr.adoc-diff-row-gap > th {
   background: var(--adoc-diff-gap-tint, transparent);
 }
 
-.adoc-diff-gap-ins {
-  --adoc-diff-gap-tint: var(
-    --vscode-diffEditor-insertedLineBackground,
-    rgba(0, 128, 0, 0.12)
-  );
-  --adoc-diff-gap-border: var(
-    --vscode-diffEditor-insertedTextBackground,
-    rgba(0, 128, 0, 0.4)
-  );
-}
-
+/* Both directions reserve the same neutral space: the content itself (on the
+ * pane that has it) carries the green/red highlight. */
+.adoc-diff-gap-ins,
 .adoc-diff-gap-del {
-  --adoc-diff-gap-tint: var(
-    --vscode-diffEditor-removedLineBackground,
-    rgba(255, 0, 0, 0.12)
-  );
-  --adoc-diff-gap-border: var(
-    --vscode-diffEditor-removedTextBackground,
-    rgba(255, 0, 0, 0.4)
-  );
+  --adoc-diff-gap-tint: var(--adoc-diff-gap-neutral-tint);
+  --adoc-diff-gap-border: var(--adoc-diff-gap-neutral-border);
 }
 
 .adoc-diff-gap-mixed {
-  --adoc-diff-gap-tint: rgba(128, 128, 128, 0.1);
-  --adoc-diff-gap-border: var(--vscode-editorWarning-foreground, #cca700);
+  --adoc-diff-gap-tint: var(--adoc-diff-gap-neutral-tint);
+  --adoc-diff-gap-border: var(--vscode-descriptionForeground, #9d9d9d);
 }
 
 /* A residual gap aligns heights that differ for a non-semantic reason (word
@@ -120,7 +84,7 @@ tr.adoc-diff-row-gap > th {
 }
 
 .adoc-diff-collapsed:not(.adoc-diff-expanded)::before {
-  content: "− " attr(data-adoc-diff-collapse-lines);
+  content: "− " attr(data-adoc-diff-collapse-label);
   position: absolute;
   left: 0;
   right: 0;
@@ -215,19 +179,108 @@ pre.adoc-diff-code > code {
   background: rgba(204, 167, 0, 0.12);
 }
 
+/* The line that only reserves space on the other side of an added/deleted
+ * code line is empty: neutral gray, like the block gap. */
 .adoc-diff-code-line-gap {
   color: transparent;
+  background: var(--adoc-diff-gap-neutral-tint);
 }
 
 .adoc-diff-code-line-gap::before {
   content: "";
 }
 
-/* Modified, but neither purely added nor removed: the cell keeps a light amber
- * tint, while the changed words keep the usual red/green marks. Blocks are not
- * outlined; `adoc-diff-block-changed` remains as a marker for navigation. */
+/* Modified, but neither purely added nor removed: the cell keeps a light
+ * neutral tint, while the changed words keep their neutral marks. */
 .adoc-diff-cell-changed {
-  background: rgba(204, 167, 0, 0.1);
+  background: rgba(128, 128, 128, 0.08);
+}
+
+/* A changed block with no word-level marker (a different image, a changed
+ * formula, a table width, a structural table change) is marked by a small icon
+ * in the left margin instead of an amber strip or outline: the block itself
+ * stays uncolored, and the localized tooltip set by the client explains it.
+ * The kernel only sets `data-adoc-diff-icon` when the block has no
+ * `adoc-diff-word` or changed code line to show the change already. */
+[data-adoc-diff-icon] {
+  position: relative;
+}
+
+[data-adoc-diff-icon]::before {
+  /* ASCII `~` on purpose: it matches the `~` of the change legend and exists
+   * in every preview font, unlike most edit icons. */
+  content: "~";
+  position: absolute;
+  left: -20px;
+  top: 0;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-descriptionForeground, #9d9d9d);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+  opacity: 0.9;
+  cursor: help;
+  user-select: none;
+}
+
+/* A block that exists on both sides but moved to another position. It is not
+ * an addition or a removal: a blue strip tells the reader to compare places,
+ * and the move is one navigable hunk on both panes. */
+.adoc-diff-moved {
+  box-shadow: inset 2px 0 0 var(--vscode-editorInfo-foreground, #3794ff);
+}
+
+/* Non-visual change (formatting, link target, anchor id): the text looks the
+ * same, so a small icon with a tooltip (set by the client, localized) is the
+ * only honest marker. */
+[data-adoc-diff-nonvisual] {
+  position: relative;
+}
+
+[data-adoc-diff-nonvisual]::after {
+  /* ASCII `!` on purpose: the editor/preview fonts do not all carry `✎`, and a
+   * missing glyph renders as a tofu square. The tooltip carries the detail. */
+  content: "!";
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  color: var(--vscode-editor-background, #1e1e1e);
+  background: var(--vscode-editorWarning-foreground, #cca700);
+  border-radius: 50%;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The hunk the status navigator just jumped to: a short-lived outline so the
+ * reader sees where the viewport landed. */
+.adoc-diff-hunk-target {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4) !important;
+  outline-offset: -1px;
+}
+
+/* `outline` is not painted on table rows in every engine: highlight the cells
+ * instead when the hunk is a row. */
+tr.adoc-diff-hunk-target > td,
+tr.adoc-diff-hunk-target > th {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4) !important;
+  outline-offset: -2px;
 }
 
 .adoc-diff-word-del {
@@ -251,6 +304,12 @@ pre.adoc-diff-code > code {
     --vscode-diffEditor-removedLineBackground,
     rgba(255, 0, 0, 0.1)
   );
+  /* A pattern keeps the meaning when the color is not perceived. */
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 5px,
+    rgba(255, 0, 0, 0.06) 5px 10px
+  );
   outline: 1px solid
     var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.35));
   outline-offset: -1px;
@@ -260,6 +319,11 @@ pre.adoc-diff-code > code {
   background: var(
     --vscode-diffEditor-insertedLineBackground,
     rgba(0, 128, 0, 0.1)
+  );
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0 5px,
+    rgba(0, 128, 0, 0.06) 5px 10px
   );
   outline: 1px solid
     var(--vscode-diffEditor-insertedTextBackground, rgba(0, 128, 0, 0.35));
@@ -298,6 +362,11 @@ th.adoc-diff-cell-del {
     --vscode-diffEditor-removedLineBackground,
     rgba(255, 0, 0, 0.12)
   );
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 5px,
+    rgba(255, 0, 0, 0.06) 5px 10px
+  );
 }
 
 td.adoc-diff-cell-ins,
@@ -306,4 +375,23 @@ th.adoc-diff-cell-ins {
     --vscode-diffEditor-insertedLineBackground,
     rgba(0, 128, 0, 0.12)
   );
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0 5px,
+    rgba(0, 128, 0, 0.06) 5px 10px
+  );
+}
+
+/* A section's `h2` top margin collapses through the `.sect1` wrapper unless a
+ * border stops it. The preview adds `border-top` only to `.sect1 + .sect1`, so
+ * adding a section before another one moves its heading 30–40 px down while the
+ * wrapper tops (the alignment anchors) still match. Give every section the same
+ * transparent border in the diff so both panes measure and render the heading
+ * at the same offset; the divider between sections keeps its color. */
+.diff-pane #content .sect1 {
+  border-top: 1px solid transparent;
+}
+
+.diff-pane #content .sect1 + .sect1 {
+  border-top-color: var(--vscode-panel-border, #e7e7e9);
 }

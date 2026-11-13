@@ -34,6 +34,16 @@ export function mermaidClientRenderScript(): string {
   return `
     const MERMAID_SOURCE_PREFIX = ${JSON.stringify(MERMAID_SOURCE_DATA_URI_PREFIX)};
     let mermaidRenderCount = 0;
+    // A rendered diff marks a changed image with \`adoc-diff-*\` classes. The
+    // diagram replaces the image, so move the markers to what replaces it;
+    // otherwise the outline/word markers would leave the page with the image.
+    function copyMermaidDiffMarkers(from, to) {
+      const markers = Array.from(from.classList ?? []).filter((name) => name.startsWith('adoc-diff-'));
+      for (const name of markers) {
+        to.classList?.add(name);
+        to.querySelectorAll?.('svg').forEach((svg) => svg.classList.add(name));
+      }
+    }
     async function renderMermaidImage(img) {
       const base64 = img.getAttribute('src').slice(MERMAID_SOURCE_PREFIX.length);
       const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -43,6 +53,7 @@ export function mermaidClientRenderScript(): string {
       const container = document.createElement('div');
       container.className = 'mermaid';
       container.innerHTML = svg;
+      copyMermaidDiffMarkers(img, container);
       img.replaceWith(container);
       bindFunctions?.(container);
     }

@@ -46,6 +46,11 @@ export function renderDiff(
   // normalized signature can detect a changed image, video or embed.
   annotateMediaKeys(leftDoc)
   annotateMediaKeys(rightDoc)
+  // Link targets are ignored by the visual signature (they encode document
+  // identity), but a changed `href` is a real, non-visual difference. Store a
+  // document-relative identity so it can be compared across documents.
+  annotateLinkKeys(leftDoc)
+  annotateLinkKeys(rightDoc)
   const leftRoot = findPreviewRoot(leftDoc)
   const rightRoot = findPreviewRoot(rightDoc)
 
@@ -113,6 +118,36 @@ function visitElements(
     visit(child)
     visitElements(child, visit)
   }
+}
+
+const LINK_TAGS = new Set(['a', 'area'])
+
+/**
+ * Adds `data-adoc-diff-link-key` to links: a stable, document-relative identity
+ * of the target they point to. `href` itself is ignored by the visual signature
+ * (it encodes the document path), so this key is what lets the non-visual pass
+ * report "the link text is the same but it now points somewhere else".
+ *
+ * Fragment-only links (`#section`) keep their raw value: they must not be
+ * resolved against the document base, and a changed fragment is a real change.
+ */
+function annotateLinkKeys(doc: Document): void {
+  const base = findFirstElementByTag(doc, 'base')
+  const baseHref = base ? getAttribute(base, 'href') : undefined
+  visitElements(doc, (element) => {
+    if (!LINK_TAGS.has(element.tagName)) {
+      return
+    }
+    const href = getAttribute(element, 'href')
+    if (href === undefined || href === '') {
+      return
+    }
+    setAttribute(
+      element,
+      'data-adoc-diff-link-key',
+      href.startsWith('#') ? href : normalizeMediaUri(href, baseHref),
+    )
+  })
 }
 
 function normalizeMediaUri(

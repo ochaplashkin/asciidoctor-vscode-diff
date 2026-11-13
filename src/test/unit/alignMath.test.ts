@@ -99,3 +99,62 @@ describe('computeSpaces', () => {
     )
   })
 })
+
+describe('computeSpaces with gap labels', () => {
+  test('carries the missing block count and object to the space', () => {
+    assert.deepEqual(
+      computeSpaces([
+        interval({
+          leftDistance: 100,
+          rightDistance: 220,
+          leftGap: true,
+          leftKind: 'ins',
+          leftCount: 4,
+          leftObject: 'blocks',
+        }),
+      ]),
+      [
+        {
+          side: 'left',
+          position: 'before',
+          kind: 'ins',
+          height: 120,
+          count: 4,
+          object: 'blocks',
+        },
+      ],
+    )
+  })
+
+  test('describes a removed table by its rows', () => {
+    assert.deepEqual(
+      computeSpaces([
+        interval({
+          leftDistance: 300,
+          rightDistance: 100,
+          rightGap: true,
+          rightKind: 'del',
+          rightCount: 7,
+          rightObject: 'table',
+        }),
+      ]),
+      [
+        {
+          side: 'right',
+          position: 'before',
+          kind: 'del',
+          height: 200,
+          count: 7,
+          object: 'table',
+        },
+      ],
+    )
+  })
+
+  test('does not add label data to a residual gap', () => {
+    assert.deepEqual(
+      computeSpaces([interval({ leftDistance: 100, rightDistance: 130 })]),
+      [{ side: 'left', position: 'before', kind: 'residual', height: 30 }],
+    )
+  })
+})

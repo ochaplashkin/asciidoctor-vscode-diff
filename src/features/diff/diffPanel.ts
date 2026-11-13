@@ -1,4 +1,3 @@
-import * as path from 'node:path'
 import * as vscode from 'vscode'
 import * as uri from 'vscode-uri'
 import { Disposable, disposeAll } from '../../core/dispose.js'
@@ -12,7 +11,13 @@ import {
 import { AsciidocContributionProvider } from '../extensionContributions.js'
 import { AsciidocPreviewConfigurationManager } from '../preview/previewConfig.js'
 import type { DiffDocumentStrings } from './diffDocument.js'
-import type { DiffToWebviewMessage } from './diffTypes.js'
+import { diffTitles } from './diffTitle.js'
+import type {
+  DiffFromWebviewMessage,
+  DiffPanelState,
+  DiffSide,
+  DiffToWebviewMessage,
+} from './diffTypes.js'
 
 /**
  * The webview panel hosting the side-by-side rendered diff.
@@ -30,6 +35,9 @@ export class AsciidocDiffPanel
   private left: vscode.Uri
   private right: vscode.Uri
   private _ratio: number | undefined
+  private _leftLine: number | undefined
+  private _rightLine: number | undefined
+  private _expanded: string[] = []
   private disposed = false
   private readonly disposables: vscode.Disposable[] = []
 
@@ -41,6 +49,16 @@ export class AsciidocDiffPanel
 
   private readonly _onDidRequestSwapEmitter = new vscode.EventEmitter<void>()
   public readonly onDidRequestSwap = this._onDidRequestSwapEmitter.event
+
+  private readonly _onDidChangeViewStateEmitter =
+    new vscode.EventEmitter<void>()
+  public readonly onDidChangeViewState = this._onDidChangeViewStateEmitter.event
+
+  private readonly _onDidRequestOpenLinkEmitter = new vscode.EventEmitter<{
+    readonly href: string
+    readonly side: DiffSide
+  }>()
+  public readonly onDidRequestOpenLink = this._onDidRequestOpenLinkEmitter.event
 
   private constructor(
     editor: vscode.WebviewPanel,
@@ -56,6 +74,11 @@ export class AsciidocDiffPanel
     this.right = right
 
     this.editor.onDidDispose(() => this.dispose(), null, this.disposables)
+    this.editor.onDidChangeViewState(
+      () => this._onDidChangeViewStateEmitter.fire(),
+      null,
+      this.disposables,
+    )
     this.editor.webview.onDidReceiveMessage(
       (message) => this.onMessage(message),
       null,
@@ -97,7 +120,7 @@ export class AsciidocDiffPanel
 
   public static async revive(
     webview: vscode.WebviewPanel,
-    state: { left?: string; right?: string; ratio?: number },
+    state: Partial<DiffPanelState>,
     contributionProvider: AsciidocContributionProvider,
     previewConfigurations: AsciidocPreviewConfigurationManager,
     logger: Logger,
@@ -126,6 +149,9 @@ export class AsciidocDiffPanel
       logger,
     )
     panel._ratio = state.ratio
+    panel._leftLine = state.leftLine
+    panel._rightLine = state.rightLine
+    panel._expanded = [...(state.expanded ?? [])]
     return panel
   }
 
@@ -145,6 +171,18 @@ export class AsciidocDiffPanel
     return this._ratio
   }
 
+  public get leftLine(): number | undefined {
+    return this._leftLine
+  }
+
+  public get rightLine(): number | undefined {
+    return this._rightLine
+  }
+
+  public get expanded(): readonly string[] {
+    return this._expanded
+  }
+
   public get diffScriptUri(): string {
     return this.asMediaWebViewSrc('dist', 'diff.js')
   }
@@ -157,22 +195,58 @@ export class AsciidocDiffPanel
     return {
       rendering: t('diff.status.rendering'),
       noDifferences: t('diff.status.noDifferences'),
+      noVisualDifferences: t('diff.status.noVisualDifferences'),
+      statusNonVisualSummary: t('diff.status.nonVisualSummary'),
+      statusNonVisualSummaryOne: t('diff.status.nonVisualSummaryOne'),
+      statusNavigationSummary: t('diff.status.navigationSummary'),
+      statusNavigationSummaryOne: t('diff.status.navigationSummaryOne'),
+      navigationChanged: t('diff.nonVisual.navigation'),
       error: t('diff.status.error'),
       old: t('diff.label.old'),
       new: t('diff.label.new'),
       swap: t('diff.swap'),
+      nonVisualFormatting: t('diff.nonVisual.formatting'),
+      nonVisualLink: t('diff.nonVisual.link'),
+      nonVisualId: t('diff.nonVisual.id'),
+      blockChanged: t('diff.block.changed'),
+      mediaChanged: t('diff.media.changed'),
+      shellDiffers: t('diff.shellDiffers'),
+      statusSummary: t('diff.status.summary'),
+      statusNonVisual: t('diff.status.nonVisual'),
+      statusJump: t('diff.status.jump'),
+      collapseExpand: t('diff.collapse.expand'),
+      collapseCollapse: t('diff.collapse.collapse'),
+      collapseLabel: t('diff.collapse.label'),
+      collapseLabelWithExcerpt: t('diff.collapse.labelWithExcerpt'),
+      gapAddedBlocks: t('diff.gap.addedBlocks'),
+      gapAddedTable: t('diff.gap.addedTable'),
+      gapAddedLines: t('diff.gap.addedLines'),
+      gapRemovedBlocks: t('diff.gap.removedBlocks'),
+      gapRemovedTable: t('diff.gap.removedTable'),
+      gapRemovedLines: t('diff.gap.removedLines'),
+      gapChangedBlocks: t('diff.gap.changedBlocks'),
+      gapChangedTable: t('diff.gap.changedTable'),
+      gapChangedLines: t('diff.gap.changedLines'),
+      gapAddedBlock: t('diff.gap.addedBlock'),
+      gapAddedTableRow: t('diff.gap.addedTableRow'),
+      gapAddedLine: t('diff.gap.addedLine'),
+      gapRemovedBlock: t('diff.gap.removedBlock'),
+      gapRemovedTableRow: t('diff.gap.removedTableRow'),
+      gapRemovedLine: t('diff.gap.removedLine'),
+      gapChangedBlock: t('diff.gap.changedBlock'),
+      gapChangedTableRow: t('diff.gap.changedTableRow'),
+      gapChangedLine: t('diff.gap.changedLine'),
     }
   }
 
-  public get state(): {
-    left: string
-    right: string
-    ratio?: number
-  } {
+  public get state(): DiffPanelState {
     return {
       left: this.left.toString(),
       right: this.right.toString(),
       ratio: this._ratio,
+      leftLine: this._leftLine,
+      rightLine: this._rightLine,
+      expanded: this._expanded,
     }
   }
 
@@ -225,6 +299,8 @@ export class AsciidocDiffPanel
     this._onDisposeEmitter.dispose()
     this._onDidScrollEmitter.dispose()
     this._onDidRequestSwapEmitter.dispose()
+    this._onDidChangeViewStateEmitter.dispose()
+    this._onDidRequestOpenLinkEmitter.dispose()
     this.editor.dispose()
     disposeAll(this.disposables)
     super.dispose()
@@ -249,15 +325,36 @@ export class AsciidocDiffPanel
     return this.editor.webview.cspSource
   }
 
-  private onMessage(message: { type?: string; ratio?: number }): void {
+  private onMessage(message: DiffFromWebviewMessage): void {
     switch (message.type) {
       case 'didScroll': {
-        this._ratio = message.ratio
-        this._onDidScrollEmitter.fire(message.ratio ?? 0)
+        if (typeof message.ratio === 'number') {
+          this._ratio = message.ratio
+          this._onDidScrollEmitter.fire(message.ratio)
+        }
+        if (typeof message.leftLine === 'number') {
+          this._leftLine = message.leftLine
+        }
+        if (typeof message.rightLine === 'number') {
+          this._rightLine = message.rightLine
+        }
         break
       }
       case 'swap': {
         this._onDidRequestSwapEmitter.fire()
+        break
+      }
+      case 'setExpanded': {
+        this._expanded = [...(message.keys ?? [])]
+        break
+      }
+      case 'openLink': {
+        if (message.href !== undefined && message.href !== '') {
+          this._onDidRequestOpenLinkEmitter.fire({
+            href: message.href,
+            side: message.side === 'left' ? 'left' : 'right',
+          })
+        }
         break
       }
     }
@@ -274,11 +371,8 @@ export class AsciidocDiffPanel
   }
 
   private static panelTitle(left: vscode.Uri, right: vscode.Uri): string {
-    return t(
-      'diff.panel.title',
-      path.basename(left.fsPath),
-      path.basename(right.fsPath),
-    )
+    const titles = diffTitles(left.fsPath, right.fsPath)
+    return t('diff.panel.title', titles.left, titles.right)
   }
 
   private static getLocalResourceRoots(

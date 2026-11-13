@@ -71,8 +71,13 @@ body.diff-body {
 
 .diff-status {
   flex: 0 0 auto;
+  max-width: 40ch;
+  overflow: hidden;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   opacity: 0.8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .diff-swap {
@@ -137,7 +142,11 @@ body.diff-body {
 }
 
 .diff-legend-change {
-  background: rgba(204, 167, 0, 0.2);
+  background: rgba(128, 128, 128, 0.18);
+}
+
+.diff-legend-moved {
+  background: rgba(55, 148, 255, 0.2);
 }
 
 .diff-status-clickable {
@@ -148,8 +157,64 @@ body.diff-body {
   text-decoration: underline;
 }
 
+.diff-status[role="button"]:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.diff-status-navigation {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+/* The two documents use different shells (doctype, TOC placement, preview
+ * style): the combined body can only carry one set of shell classes, so part of
+ * the other document's styling is not its own. A compact badge rather than a
+ * long message in the header; the tooltip carries the explanation. */
+.diff-shell-warning {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid var(--vscode-editorWarning-foreground, #cca700);
+  border-radius: 50%;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+}
+
 .diff-status-busy {
   opacity: 0.7;
+}
+
+/* Keep the previous numbers readable while a live re-render runs; only show a
+ * pulse. `Rendering…` is written by the client after a delay, and only when
+ * there is no summary to keep. */
+.diff-status-busy::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
+  animation: adoc-diff-status-pulse 1s ease-in-out infinite;
+}
+
+@keyframes adoc-diff-status-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .diff-status-error {
@@ -194,4 +259,28 @@ body.diff-body {
 
 .diff-pane:last-child {
   border-right: 0;
+}
+
+/* A gap label is drawn by the client as an overlay in the pane, not as a
+ * pseudo-element on the preview block (the preview stylesheet already owns
+ * `::before`/`::after` on containers such as `#content`). */
+.adoc-diff-gap-overlay {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground, rgba(160, 160, 160, 0.9));
+  background: var(--adoc-diff-gap-tint, transparent);
+  border: 1px dashed var(--adoc-diff-gap-border, transparent);
+  border-radius: 2px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 2;
 }

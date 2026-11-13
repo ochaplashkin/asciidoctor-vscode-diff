@@ -1,0 +1,292 @@
+// Diff showcase — old version.
+//
+// This document and ../../v2/index.adoc have the same structure and differ in
+// every block, so a rendered comparison exercises every kind of marker:
+// word/block additions and removals, formatting-only, link-only and id-only
+// changes, changed images, Mermaid/PlantUML diagrams, formulas, table cells,
+// rows, columns and spans, code lines and callouts, admonitions, quotes,
+// lists, gaps and a collapsed deletion.
+//
+// The three "Policy" sections are the only intentional exception: they are
+// identical on both sides and are only reordered, to exercise move detection.
+= Diff showcase: old version
+:toc: left
+:toclevels: 2
+:icons: font
+:experimental:
+:imagesdir: ../../images
+:stem: latexmath
+:source-highlighter: highlight.js
+:author: Old Author
+:revnumber: 1.0
+:revdate: 2026-01-01
+
+== Overview
+
+The product runs on Linux, macOS and Windows.
+It also runs in the browser.
+
+[.lead]
+The old overview keeps two sentences.
+A sentence that exists only in the old version.
+
+.Supported platforms (old)
+* Linux
+* macOS
+* Windows
+* Web
+
+* one
+* two
+* three
+
+[start=1]
+.Steps (old)
+. install
+. configure
+. run
+
+Old term:: Old definition.
+Shared term:: Shared definition.
+
+* [x] Reviewed by the old team
+* [ ] Published on the old site
+
+[NOTE]
+====
+Old note body.
+====
+
+[TIP]
+====
+Old tip body.
+====
+
+[IMPORTANT]
+====
+Old important body.
+====
+
+== Formatting and links
+
+**Formatted label** stays the same length.
+
+The old command is `make old`.
+
+Read the https://example.com/old[guide] before you start.
+
+[[old-anchor]]
+This paragraph keeps its text but changes its anchor.
+
+A footnote reference.footnote:[The old footnote text.]
+
+Press kbd:[Ctrl+O] and choose menu:File[Save], then btn:[Old button].
+
+icon:heart[] Old icon label.
+
+== Diagrams, media and math
+
+.A diagram (old title)
+image::document.svg[Old diagram,200]
+
+Inline image: the icon image:document.svg[old icon] is old.
+
+.Quotation (old attribution)
+[quote, Old Author, Old Book]
+____
+Old quote text.
+____
+
+[mermaid]
+----
+graph TD; A-->B; B-->C;
+----
+
+[plantuml]
+----
+Alice -> Bob: old message
+----
+
+Inline math stem:[E = m c^2] and a block formula.
+
+[stem]
+++++
+\[ a^2 + b^2 = c^2 \]
+++++
+
+== Tables
+
+.Table of services (old caption)
+[cols="1,1,1,1"]
+|===
+|Name |Count |Status |Owner
+
+|alpha |1 |ready |ann
+|beta |2 |ready |bob
+|gamma |3 |draft |carl
+|===
+
+[cols="1,1,1",width="100%"]
+|===
+|Name |Status |Owner
+
+|alpha |ready |ann
+|beta |draft |bob
+|===
+
+[cols="1,1,1"]
+|===
+|A |B |C
+
+2+|old span
+|D
+|===
+
+[cols="1,1"]
+|===
+|Name |Value
+
+|keep |1
+|removed |2
+|also keep |3
+|===
+
+== Code and literals
+
+[source,ruby]
+----
+def build(path)
+  data = read(path)
+  validate(data)
+  write(path, data)
+end
+----
+
+[source,ruby]
+----
+config = load(path) # <1>
+apply(config) # <2>
+----
+<1> Loads the old configuration.
+<2> Applies the old configuration.
+
+[source,text]
+----
+first line
+line that disappears
+last line
+----
+
+.Old listing
+----
+old plain text
+second old line
+----
+
+.Old literal
+....
+Old literal line one.
+Old literal line two.
+....
+
+.Removed long listing
+[source,text]
+----
+removed line 1
+removed line 2
+removed line 3
+removed line 4
+removed line 5
+removed line 6
+removed line 7
+removed line 8
+removed line 9
+removed line 10
+removed line 11
+removed line 12
+----
+
+== Other blocks
+
+[example]
+====
+Old example block text.
+====
+
+[sidebar]
+****
+Old sidebar text.
+****
+
+[open]
+--
+Old open block text.
+--
+
+[verse, Old Poet, Old Poem]
+____
+Old verse line one +
+Old verse line two
+____
+
+A line with a hard break +
+and the old continuation.
+
+++++
+<span class="badge">old badge</span>
+++++
+
+'''
+
+A paragraph after the old thematic break.
+
+== Policy A
+
+The policy text is identical on both sides.
+
+* keep this rule
+* and this rule
+
+== Policy B
+
+The policy text is identical on both sides.
+
+* keep this rule
+* and this rule
+
+== Policy C
+
+The policy text is identical on both sides.
+
+* keep this rule
+* and this rule
+
+== Deprecated options
+
+The old release documented options that are gone.
+
+[source,text]
+----
+deprecated.1 = true
+deprecated.2 = true
+deprecated.3 = true
+deprecated.4 = true
+deprecated.5 = true
+deprecated.6 = true
+deprecated.7 = true
+deprecated.8 = true
+deprecated.9 = true
+deprecated.10 = true
+deprecated.11 = true
+deprecated.12 = true
+----
+
+.Final old paragraph
+This paragraph and the long listing above disappear in the new version.
+
+== Appendix
+
+A final old paragraph with a xref to <<_policy_a>> and a footnote.footnote:[Old appendix note.]
+
+[.old-role]
+A paragraph with the old role.

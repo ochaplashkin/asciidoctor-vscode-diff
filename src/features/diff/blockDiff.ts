@@ -41,14 +41,49 @@ import {
   wrapTextNodeRanges,
 } from './htmlTree.js'
 import { computeInlineDiff, type InlineRange } from './inlineDiff.js'
-import { subtreeSignature, subtreesEqual } from './normalizeHtml.js'
+import {
+  type NonVisualChangeKind,
+  navigationSignature,
+  nonVisualKinds,
+  ownNonVisualKinds,
+  subtreeSignature,
+  subtreesEqual,
+  visualClasses,
+} from './normalizeHtml.js'
 
 export interface DiffStats {
+  /**
+   * Number of change regions ("hunks") the reviewer can navigate, the single
+   * source of truth for the status. A hunk is one changed block pair, one
+   * continuous run of added/removed blocks, one changed table row (or one
+   * structural table change), one continuous run of changed code lines, or one
+   * formatting/link/id-only change.
+   */
+  changes: number
+  /** Hunks that change what is rendered (the `adoc-diff-*` visual markers). */
+  visualChanges: number
+  /** Hunks that only change formatting, a link target or an anchor id. */
+  nonVisualChanges: number
   addedBlocks: number
   removedBlocks: number
+  /** Blocks that exist on both sides but moved to another position. */
+  movedBlocks: number
   changedBlocks: number
   changedTables: number
   changedCells: number
+  /** Non-visual detail: blocks with a formatting-only change. */
+  formattingChanges: number
+  /** Non-visual detail: blocks whose link target changed. */
+  linkChanges: number
+  /** Non-visual detail: blocks whose anchor id changed. */
+  idChanges: number
+  /**
+   * Changes that only affect the generated table of contents (for example
+   * `:toclevels:`). It is not a hunk: the TOC is not a content region and is
+   * not aligned or navigated, but a TOC-only change must not be reported as
+   * "No differences".
+   */
+  navigationChanges: number
 }
 
 export type DiffDeletedBlocksMode = 'collapse' | 'expand'
@@ -82,6 +117,9 @@ interface DiffContext {
   nextAnchor: number
   nextCollapse: number
   nextTable: number
+  nextHunk: number
+  /** Depth of table cells being compared; a cell belongs to one row hunk. */
+  cellDepth: number
 }
 
 interface Alignment {
@@ -164,6 +202,186 @@ function markChanged(el: Element): void {
 
 function markCellChanged(el: Element): void {
   addClass(el, 'adoc-diff-cell-changed')
+}
+
+function hasHunk(el: Element): boolean {
+  return getAttribute(el, 'data-adoc-diff-hunk') !== undefined
+}
+
+/**
+ * Starts a hunk: a change region the reviewer can navigate. The host and the
+ * client both count hunks, not markers, so one changed cell, one table row or
+ * one run of code lines is exactly one change.
+ */
+function beginHunk(ctx: DiffContext, kind: 'visual' | 'nonvisual'): string {
+  ctx.stats.changes++
+  if (kind === 'visual') {
+    ctx.stats.visualChanges++
+  } else {
+    ctx.stats.nonVisualChanges++
+  }
+  return `h${ctx.nextHunk++}`
+}
+
+function markHunk(
+  ctx: DiffContext,
+  kind: 'visual' | 'nonvisual',
+  left?: Element,
+  right?: Element,
+): string {
+  const id = beginHunk(ctx, kind)
+  if (left) {
+    assignHunk(left, id)
+  }
+  if (right) {
+    assignHunk(right, id)
+  }
+  return id
+}
+
+/**
+ * Assigns a hunk id unless the element already carries one. A gap marker can
+ * land on an element that is itself a change target (the next matched block);
+ * the original hunk wins, and the gap keeps its visible space.
+ */
+function assignHunk(el: Element, id: string): void {
+  if (!hasHunk(el)) {
+    setAttribute(el, 'data-adoc-diff-hunk', id)
+  }
+}
+
+/**
+ * Marks a visual hunk unless the element is inside a table cell: the table row
+ * is the navigation unit there, so cells must not add their own hunks.
+ */
+function markVisualHunk(
+  ctx: DiffContext,
+  left?: Element,
+  right?: Element,
+): void {
+  if (ctx.cellDepth > 0) {
+    return
+  }
+  markHunk(ctx, 'visual', left, right)
+}
+
+/**
+ * Where the non-visual badge is rendered. A `<tr>` cannot be positioned
+ * reliably, so the badge goes on its first cell instead.
+ */
+function nonVisualTarget(el: Element): Element {
+  if (el.tagName === 'tr') {
+    return cellsOf(el)[0] ?? el
+  }
+  return el
+}
+
+function markNonVisualBadge(
+  left: Element,
+  right: Element,
+  kinds: ReadonlySet<NonVisualChangeKind>,
+): void {
+  const kind: NonVisualChangeKind = kinds.has('id')
+    ? 'id'
+    : kinds.has('link')
+      ? 'link'
+      : 'formatting'
+  const leftTarget = nonVisualTarget(left)
+  const rightTarget = nonVisualTarget(right)
+  setAttribute(leftTarget, 'data-adoc-diff-nonvisual', kind)
+  if (rightTarget !== leftTarget) {
+    setAttribute(rightTarget, 'data-adoc-diff-nonvisual', kind)
+  }
+}
+
+function countNonVisualKinds(
+  ctx: DiffContext,
+  kinds: ReadonlySet<NonVisualChangeKind>,
+): void {
+  if (kinds.has('formatting')) {
+    ctx.stats.formattingChanges++
+  }
+  if (kinds.has('link')) {
+    ctx.stats.linkChanges++
+  }
+  if (kinds.has('id')) {
+    ctx.stats.idChanges++
+  }
+}
+
+/**
+ * The non-visual kinds of the element and of its inline content, ignoring
+ * block descendants: those are compared on their own, so a badge on an outer
+ * container must not repeat a change that is already marked deeper.
+ */
+function inlineNonVisualKinds(
+  left: Element,
+  right: Element,
+): Set<NonVisualChangeKind> {
+  const kinds = new Set<NonVisualChangeKind>()
+  if (left.tagName !== right.tagName) {
+    kinds.add('formatting')
+  }
+  for (const kind of ownNonVisualKinds(left, right)) {
+    kinds.add(kind)
+  }
+  const visit = (leftNode: Element, rightNode: Element): void => {
+    const leftChildren = leftNode.childNodes
+    const rightChildren = rightNode.childNodes
+    if (leftChildren.length !== rightChildren.length) {
+      kinds.add('formatting')
+      return
+    }
+    for (let index = 0; index < leftChildren.length; index++) {
+      const leftChild = leftChildren[index]
+      const rightChild = rightChildren[index]
+      if (isElement(leftChild) && isElement(rightChild)) {
+        if (BLOCK_TAGS.has(leftChild.tagName)) {
+          continue
+        }
+        for (const kind of ownNonVisualKinds(leftChild, rightChild)) {
+          kinds.add(kind)
+        }
+        visit(leftChild, rightChild)
+      } else if (isElement(leftChild) !== isElement(rightChild)) {
+        kinds.add('formatting')
+      }
+    }
+  }
+  visit(left, right)
+  return kinds
+}
+
+/**
+ * Reports a formatting/link/id-only difference in a subtree whose rendered
+ * content is unchanged. Returns whether anything was marked.
+ */
+function diffNonVisual(
+  left: Element,
+  right: Element,
+  ctx: DiffContext,
+): boolean {
+  if (hasHunk(left) || hasHunk(right)) {
+    return false
+  }
+  const inline = inlineNonVisualKinds(left, right)
+  let marked = false
+  if (inline.size > 0) {
+    markNonVisualBadge(left, right, inline)
+    countNonVisualKinds(ctx, inline)
+    markHunk(ctx, 'nonvisual', left, right)
+    marked = true
+  }
+  const leftBlocks = blockChildren(left)
+  const rightBlocks = blockChildren(right)
+  if (leftBlocks.length === rightBlocks.length) {
+    for (let index = 0; index < leftBlocks.length; index++) {
+      if (diffNonVisual(leftBlocks[index], rightBlocks[index], ctx)) {
+        marked = true
+      }
+    }
+  }
+  return marked
 }
 
 function isInsideCell(el: Element): boolean {
@@ -258,11 +476,19 @@ export function diffBlocks(
   options: DiffRenderOptions = defaultDiffRenderOptions,
 ): BlockDiffResult {
   const stats: DiffStats = {
+    changes: 0,
+    visualChanges: 0,
+    nonVisualChanges: 0,
     addedBlocks: 0,
     removedBlocks: 0,
+    movedBlocks: 0,
     changedBlocks: 0,
     changedTables: 0,
     changedCells: 0,
+    formattingChanges: 0,
+    linkChanges: 0,
+    idChanges: 0,
+    navigationChanges: 0,
   }
   const ctx: DiffContext = {
     stats,
@@ -271,12 +497,21 @@ export function diffBlocks(
     nextAnchor: 0,
     nextCollapse: 0,
     nextTable: 0,
+    nextHunk: 0,
+    cellDepth: 0,
   }
   if (subtreesEqual(leftRoot, rightRoot)) {
+    // The rendered content is identical, but formatting, link targets and
+    // anchor ids are not part of the visual signature: report them instead of
+    // claiming that there is no difference at all.
+    diffNonVisual(leftRoot, rightRoot, ctx)
     collectLinePairs(leftRoot, rightRoot, ctx)
-    return { stats, lineMap: ctx.lineMap }
+  } else {
+    diffElement(leftRoot, rightRoot, ctx)
   }
-  diffElement(leftRoot, rightRoot, ctx)
+  reportNavigationChange(leftRoot, rightRoot, ctx)
+  markChangeIcons(leftRoot)
+  markChangeIcons(rightRoot)
   if (ctx.options.align && hasChanges(stats)) {
     // The root itself and the two boundaries are measurement anchors: they let
     // the client align the leading and trailing blocks of the whole document.
@@ -291,13 +526,96 @@ export function diffBlocks(
 }
 
 function hasChanges(stats: DiffStats): boolean {
-  return (
-    stats.addedBlocks > 0 ||
-    stats.removedBlocks > 0 ||
-    stats.changedBlocks > 0 ||
-    stats.changedTables > 0 ||
-    stats.changedCells > 0
-  )
+  return stats.changes > 0
+}
+
+/**
+ * Adds the left-margin icon only to changed blocks that have no finer marker
+ * already: `adoc-diff-word` highlights a text change word by word and
+ * `adoc-diff-code-line-*` marks the changed code lines, so an icon would be
+ * redundant there. Media blocks, formulas and structural table changes keep
+ * the icon because there is no text to point at.
+ */
+function markChangeIcons(root: Element): void {
+  const inlineMarkerAncestors = new Set<Element>()
+  walk(root, (node) => {
+    if (!isElement(node)) {
+      return
+    }
+    const marked = getClasses(node).some(
+      (className) =>
+        className === 'adoc-diff-word' ||
+        className === 'adoc-diff-code-line-changed' ||
+        className === 'adoc-diff-code-line-add' ||
+        className === 'adoc-diff-code-line-del',
+    )
+    if (!marked) {
+      return
+    }
+    let parent = node.parentNode
+    while (parent !== null && 'tagName' in parent) {
+      const element = parent as unknown as Element
+      inlineMarkerAncestors.add(element)
+      parent = element.parentNode
+    }
+  })
+  walk(root, (node) => {
+    if (
+      !isElement(node) ||
+      inlineMarkerAncestors.has(node) ||
+      (!hasClass(node, 'adoc-diff-block-changed') &&
+        getAttribute(node, 'data-adoc-diff-media-changed') === undefined)
+    ) {
+      return
+    }
+    setAttribute(node, 'data-adoc-diff-icon', '')
+  })
+}
+
+function findGeneratedToc(root: Element): Element | undefined {
+  let found: Element | undefined
+  walk(root, (node) => {
+    if (
+      found === undefined &&
+      isElement(node) &&
+      getAttribute(node, 'id') === 'toc'
+    ) {
+      found = node
+    }
+  })
+  return found
+}
+
+/**
+ * Compares the two generated tables of contents, which `blockChildren` skips.
+ * A TOC-only change (different `:toclevels:`, a different TOC structure) is not
+ * a content hunk but is a real navigation difference; mark it so the status can
+ * say it instead of claiming that nothing changed.
+ */
+function reportNavigationChange(
+  leftRoot: Element,
+  rightRoot: Element,
+  ctx: DiffContext,
+): void {
+  const leftToc = findGeneratedToc(leftRoot)
+  const rightToc = findGeneratedToc(rightRoot)
+  if (leftToc === undefined && rightToc === undefined) {
+    return
+  }
+  const same =
+    leftToc !== undefined &&
+    rightToc !== undefined &&
+    navigationSignature(leftToc) === navigationSignature(rightToc)
+  if (same) {
+    return
+  }
+  ctx.stats.navigationChanges = 1
+  for (const toc of [leftToc, rightToc]) {
+    if (toc !== undefined) {
+      addClass(toc, 'adoc-diff-navigation-changed')
+      setAttribute(toc, 'data-adoc-diff-navigation', 'changed')
+    }
+  }
 }
 
 function addBoundaryAnchors(root: Element): void {
@@ -372,10 +690,24 @@ function collectLinePairs(
   }
 }
 
+/**
+ * The table of contents is generated from the headings: it is navigation, not
+ * a second copy of the content. Diffing it counts every heading change twice,
+ * adds gap markers inside the navigation, and lets those anchors take part in
+ * the alignment of the two panes.
+ */
+function isGeneratedNavigation(el: Element): boolean {
+  return getAttribute(el, 'id') === 'toc'
+}
+
 function blockChildren(el: Element): Element[] {
   const out: Element[] = []
   for (const child of el.childNodes) {
-    if (isElement(child) && BLOCK_TAGS.has(child.tagName)) {
+    if (
+      isElement(child) &&
+      BLOCK_TAGS.has(child.tagName) &&
+      !isGeneratedNavigation(child)
+    ) {
       out.push(child)
     }
   }
@@ -493,38 +825,6 @@ function textSimilarity(left: string, right: string): number {
   return (2 * common) / (leftWords.size + rightWords.size)
 }
 
-function pairSimilar(removed: Element[], added: Element[]): Alignment[] {
-  const out: Alignment[] = []
-  const used = new Array(added.length).fill(false)
-  for (const leftEl of removed) {
-    const leftText = elementText(leftEl)
-    let best = -1
-    let bestScore = 0
-    for (let j = 0; j < added.length; j++) {
-      if (used[j] || added[j].tagName !== leftEl.tagName) {
-        continue
-      }
-      const score = textSimilarity(leftText, elementText(added[j]))
-      if (score > bestScore) {
-        bestScore = score
-        best = j
-      }
-    }
-    if (best >= 0 && (bestScore >= SIMILARITY_THRESHOLD || bestScore === 1)) {
-      used[best] = true
-      out.push({ left: leftEl, right: added[best] })
-    } else {
-      out.push({ left: leftEl })
-    }
-  }
-  for (let j = 0; j < added.length; j++) {
-    if (!used[j]) {
-      out.push({ right: added[j] })
-    }
-  }
-  return out
-}
-
 function pairReplacements(pairs: Alignment[]): Alignment[] {
   const out: Alignment[] = []
   let i = 0
@@ -564,6 +864,30 @@ function pairReplacements(pairs: Alignment[]): Alignment[] {
  * Similarity remains as a fallback for the leftovers when the counts or tags in
  * the run do not line up positionally.
  */
+/**
+ * Whether two blocks play the same structural role: same tag, and at least one
+ * shared visual class for containers. Pairing by tag alone would pair a
+ * `div.listingblock` with a `div.paragraph` when a code block is replaced by
+ * prose, hide the removed code block inside a line diff, and leave the short
+ * block next to it unpaired.
+ */
+function sameBlockRole(left: Element, right: Element): boolean {
+  if (left.tagName !== right.tagName) {
+    return false
+  }
+  const leftContainer = blockChildren(left).length > 0
+  const rightContainer = blockChildren(right).length > 0
+  if (!leftContainer && !rightContainer) {
+    return true
+  }
+  const leftClasses = visualClasses(left)
+  const rightClasses = visualClasses(right)
+  if (leftClasses.length === 0 || rightClasses.length === 0) {
+    return true
+  }
+  return leftClasses.some((className) => rightClasses.includes(className))
+}
+
 function canPairPositionally(left: Element, right: Element): boolean {
   // Containers must be paired so their children can be aligned: pairing is the
   // only way to recurse and avoid painting the whole container.
@@ -583,29 +907,127 @@ function canPairPositionally(left: Element, right: Element): boolean {
 }
 
 function pairReplacementRun(removed: Element[], added: Element[]): Alignment[] {
-  const out: Alignment[] = []
+  const paired = new Map<Element, Element>()
   const usedAdded = new Set<number>()
-  const pairedLeft = new Set<Element>()
 
-  for (const leftEl of removed) {
-    const candidate = added.findIndex(
-      (rightEl, index) =>
-        !usedAdded.has(index) &&
-        rightEl.tagName === leftEl.tagName &&
-        canPairPositionally(leftEl, rightEl),
-    )
-    if (candidate < 0) {
+  // Pair by content first. When an item is inserted in the middle of a list,
+  // pairing the first unused same-tag block by position pairs the changed item
+  // with the inserted one and shifts every following item, which paints whole
+  // lists and nested blocks as removed/added. Similarity keeps "two" paired with
+  // "two" and leaves "inserted" as the one-sided addition.
+  const candidates: Array<{
+    leftIndex: number
+    rightIndex: number
+    score: number
+  }> = []
+  for (let leftIndex = 0; leftIndex < removed.length; leftIndex++) {
+    for (let rightIndex = 0; rightIndex < added.length; rightIndex++) {
+      if (
+        !sameBlockRole(removed[leftIndex], added[rightIndex]) ||
+        !canPairPositionally(removed[leftIndex], added[rightIndex])
+      ) {
+        continue
+      }
+      const score = textSimilarity(
+        elementText(removed[leftIndex]),
+        elementText(added[rightIndex]),
+      )
+      if (score >= SIMILARITY_THRESHOLD) {
+        candidates.push({ leftIndex, rightIndex, score })
+      }
+    }
+  }
+  candidates.sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.leftIndex - b.leftIndex ||
+      a.rightIndex - b.rightIndex,
+  )
+  for (const candidate of candidates) {
+    const leftEl = removed[candidate.leftIndex]
+    if (paired.has(leftEl) || usedAdded.has(candidate.rightIndex)) {
       continue
     }
-    usedAdded.add(candidate)
-    pairedLeft.add(leftEl)
-    out.push({ left: leftEl, right: added[candidate] })
+    usedAdded.add(candidate.rightIndex)
+    paired.set(leftEl, added[candidate.rightIndex])
   }
 
-  const remainingLeft = removed.filter((el) => !pairedLeft.has(el))
+  // One-to-one replacements that share no word (a short `2` -> `3`, a table
+  // cell `one` -> `second`) are still paired positionally. Do this only when
+  // the leftover counts match, so an insertion/deletion cannot shift the rest.
+  const remainingLeft = removed.filter((el) => !paired.has(el))
   const remainingAdded = added.filter((_, index) => !usedAdded.has(index))
-  out.push(...pairSimilar(remainingLeft, remainingAdded))
-  return out
+  if (remainingLeft.length === remainingAdded.length) {
+    const freeAdded = new Set(remainingAdded.map((_, index) => index))
+    for (const leftEl of remainingLeft) {
+      const candidate = remainingAdded.findIndex(
+        (rightEl, index) =>
+          freeAdded.has(index) &&
+          sameBlockRole(leftEl, rightEl) &&
+          canPairPositionally(leftEl, rightEl),
+      )
+      if (candidate < 0) {
+        continue
+      }
+      freeAdded.delete(candidate)
+      paired.set(leftEl, remainingAdded[candidate])
+    }
+  }
+
+  const leftOrder = new Map(removed.map((el, index) => [el, index]))
+  const rightOrder = new Map(added.map((el, index) => [el, index]))
+  const pairedRight = new Set(paired.values())
+  const entries: Array<{ alignment: Alignment; key: number; order: number }> =
+    []
+  let order = 0
+
+  for (const leftEl of removed) {
+    const rightEl = paired.get(leftEl)
+    if (rightEl) {
+      entries.push({
+        alignment: { left: leftEl, right: rightEl },
+        key: rightOrder.get(rightEl) ?? 0,
+        order: order++,
+      })
+    }
+  }
+  for (const rightEl of added) {
+    if (!pairedRight.has(rightEl)) {
+      entries.push({
+        alignment: { right: rightEl },
+        key: rightOrder.get(rightEl) ?? 0,
+        order: order++,
+      })
+    }
+  }
+  for (const leftEl of removed) {
+    if (paired.has(leftEl)) {
+      continue
+    }
+    const index = leftOrder.get(leftEl) ?? 0
+    // A removed block sits just before the next block that exists on both
+    // sides; without a right index it would move to the end of the run and the
+    // gap would reserve space in the wrong place.
+    let nextKey: number | undefined
+    for (let next = index + 1; next < removed.length; next++) {
+      const rightEl = paired.get(removed[next])
+      if (rightEl) {
+        nextKey = rightOrder.get(rightEl)
+        break
+      }
+    }
+    entries.push({
+      alignment: { left: leftEl },
+      key:
+        nextKey !== undefined
+          ? nextKey - 0.5 + index * 1e-6
+          : added.length + 1 + index * 1e-6,
+      order: order++,
+    })
+  }
+
+  entries.sort((a, b) => a.key - b.key || a.order - b.order)
+  return entries.map((entry) => entry.alignment)
 }
 
 function alignElements(left: Element[], right: Element[]): Alignment[] {
@@ -642,6 +1064,96 @@ function alignElements(left: Element[], right: Element[]): Alignment[] {
   return pairReplacements(pairs)
 }
 
+/**
+ * A block that exists on both sides at a different position.
+ */
+interface MovedBlock {
+  readonly left: Element
+  readonly right: Element
+}
+
+/**
+ * Turns an addition and a removal into a move when they are the same block.
+ *
+ * The LCS can keep only one of two permutations, so a reordered section ends up
+ * as `removed` at its old place and `added` at its new one: the reviewer sees a
+ * red collapsed strip and a green block, and has to find out by hand that
+ * nothing was edited. Pairing the leftovers by their normalized signature
+ * reports one "moved" region instead, without counting it twice.
+ *
+ * Only identical blocks are paired: a block that was also edited is a real
+ * change and keeps its add/remove markers. Non-visual differences (`id`, link
+ * target) disqualify a pair for the same reason.
+ */
+function extractMovedBlocks(pairs: Alignment[]): {
+  readonly pairs: Alignment[]
+  readonly moved: MovedBlock[]
+} {
+  const rightOnly = new Map<string, Element[]>()
+  for (const pair of pairs) {
+    if (pair.left !== undefined || pair.right === undefined) {
+      continue
+    }
+    const signature = subtreeSignature(pair.right)
+    const candidates = rightOnly.get(signature)
+    if (candidates === undefined) {
+      rightOnly.set(signature, [pair.right])
+    } else {
+      candidates.push(pair.right)
+    }
+  }
+  if (rightOnly.size === 0) {
+    return { pairs, moved: [] }
+  }
+
+  const movedRight = new Set<Element>()
+  const movedLeft = new Set<Element>()
+  const moved: MovedBlock[] = []
+  for (const pair of pairs) {
+    if (pair.left === undefined || pair.right !== undefined) {
+      continue
+    }
+    const candidates = rightOnly.get(subtreeSignature(pair.left))
+    const right = candidates?.find((element) => !movedRight.has(element))
+    if (right === undefined) {
+      continue
+    }
+    if (nonVisualKinds(pair.left, right).size > 0) {
+      continue
+    }
+    movedRight.add(right)
+    movedLeft.add(pair.left)
+    moved.push({ left: pair.left, right })
+  }
+  if (moved.length === 0) {
+    return { pairs, moved }
+  }
+  return {
+    pairs: pairs.filter(
+      (pair) =>
+        (pair.left === undefined || !movedLeft.has(pair.left)) &&
+        (pair.right === undefined || !movedRight.has(pair.right)),
+    ),
+    moved,
+  }
+}
+
+/**
+ * Marks a move as one hunk on both sides. The moved block is neither added nor
+ * removed, and it is never collapsed: the reader must be able to see it where
+ * it now lives.
+ */
+function markMovedBlock(ctx: DiffContext, left: Element, right: Element): void {
+  addClass(left, 'adoc-diff-moved')
+  addClass(right, 'adoc-diff-moved')
+  ctx.stats.movedBlocks++
+  const hunk = beginHunk(ctx, 'visual')
+  assignHunk(left, hunk)
+  assignHunk(right, hunk)
+  setAttribute(left, 'data-adoc-diff-moved', hunk)
+  setAttribute(right, 'data-adoc-diff-moved', hunk)
+}
+
 function wrapRanges(
   nodes: TextNode[],
   ranges: readonly InlineRange[],
@@ -671,6 +1183,57 @@ function wrapRanges(
   }
 }
 
+/**
+ * The source spans of the formulas in the visible text.
+ *
+ * MathJax (and the AsciiMath input jax) finds a formula by its delimiters in a
+ * single text node. Wrapping a changed character inside `$…$` or `\(…\)` in an
+ * `adoc-diff-word` span splits the source and the formula is left unrendered,
+ * so a formula change must be marked on the block instead of on its words.
+ */
+const MATH_REGION_RE = /\$[^$]*\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]/g
+
+function mathRanges(text: string): TextRange[] {
+  const ranges: TextRange[] = []
+  for (const match of text.matchAll(MATH_REGION_RE)) {
+    ranges.push({
+      start: match.index ?? 0,
+      end: (match.index ?? 0) + match[0].length,
+    })
+  }
+  return ranges
+}
+
+function overlapsMath(range: InlineRange, math: readonly TextRange[]): boolean {
+  return math.some(
+    (region) => range.start < region.end && region.start < range.end,
+  )
+}
+
+/**
+ * Splits the word-diff ranges into the ones that may be wrapped and the ones
+ * that fall inside a formula. The latter cannot be wrapped without breaking the
+ * formula, so the caller marks the whole block as changed instead.
+ */
+function splitMathRanges(
+  ranges: readonly InlineRange[],
+  math: readonly TextRange[],
+): { kept: InlineRange[]; mathChanged: boolean } {
+  if (math.length === 0) {
+    return { kept: [...ranges], mathChanged: false }
+  }
+  const kept: InlineRange[] = []
+  let mathChanged = false
+  for (const range of ranges) {
+    if (overlapsMath(range, math)) {
+      mathChanged = true
+    } else {
+      kept.push(range)
+    }
+  }
+  return { kept, mathChanged }
+}
+
 function diffInlineTextNodes(
   left: Element,
   right: Element,
@@ -685,15 +1248,30 @@ function diffInlineTextNodes(
     // Too large to diff token by token: mark the whole blocks as changed.
     addClass(left, 'adoc-diff-block-del')
     addClass(right, 'adoc-diff-block-ins')
-    ctx.stats.changedBlocks++
+    if (ctx.cellDepth === 0) {
+      ctx.stats.changedBlocks++
+      markVisualHunk(ctx, left, right)
+    }
     return true
   }
   if (result.left.length === 0 && result.right.length === 0) {
     return false
   }
-  wrapRanges(leftNodes, result.left, 'adoc-diff-word adoc-diff-word-del')
-  wrapRanges(rightNodes, result.right, 'adoc-diff-word adoc-diff-word-ins')
-  ctx.stats.changedBlocks++
+  const leftSplit = splitMathRanges(result.left, mathRanges(leftText))
+  const rightSplit = splitMathRanges(result.right, mathRanges(rightText))
+  const mathChanged = leftSplit.mathChanged || rightSplit.mathChanged
+  wrapRanges(leftNodes, leftSplit.kept, 'adoc-diff-word adoc-diff-word-del')
+  wrapRanges(rightNodes, rightSplit.kept, 'adoc-diff-word adoc-diff-word-ins')
+  if (mathChanged) {
+    // A changed formula cannot carry word markers without breaking its
+    // delimiters for MathJax: the block marker is the visible indication.
+    markChanged(left)
+    markChanged(right)
+  }
+  if (ctx.cellDepth === 0) {
+    ctx.stats.changedBlocks++
+    markVisualHunk(ctx, left, right)
+  }
   return true
 }
 
@@ -703,10 +1281,18 @@ function diffElement(left: Element, right: Element, ctx: DiffContext): boolean {
     markWhole(right, 'right')
     ctx.stats.removedBlocks++
     ctx.stats.addedBlocks++
+    markVisualHunk(ctx, left, right)
     return true
   }
   if (left.tagName === 'table' && isDataTable(left) && isDataTable(right)) {
-    return diffTable(left, right, ctx)
+    const tableChanged = diffTable(left, right, ctx)
+    if (tableChanged) {
+      return true
+    }
+    // The rows are identical, but the table itself may have changed in a way
+    // that has no visible text: a class, an id or a link. Report it instead of
+    // silently returning "unchanged".
+    return diffNonVisual(left, right, ctx)
   }
   recordLinePair(left, right, ctx)
   if (isVerbatim(left) || isVerbatim(right)) {
@@ -717,13 +1303,15 @@ function diffElement(left: Element, right: Element, ctx: DiffContext): boolean {
   if (leftBlocks.length === 0 && rightBlocks.length === 0) {
     const visualChange = needsVisualChangeMarker(left, right)
     const textChanged = diffInlineTextNodes(left, right, ctx)
-    if (textChanged && !CELL_TAGS.has(left.tagName) && !isInsideCell(left)) {
+    const inCell = ctx.cellDepth > 0 || isInsideCell(left)
+    if (textChanged && !inCell) {
       // Amber marker for a modified text block; the changed words keep their
       // red/green marks inside it.
       markChanged(left)
       markChanged(right)
     }
     if (visualChange) {
+      markMediaChanged(left, right)
       if (CELL_TAGS.has(left.tagName) || CELL_TAGS.has(right.tagName)) {
         markCellChanged(left)
         markCellChanged(right)
@@ -732,11 +1320,16 @@ function diffElement(left: Element, right: Element, ctx: DiffContext): boolean {
         markChanged(right)
         if (!textChanged) {
           ctx.stats.changedBlocks++
+          markVisualHunk(ctx, left, right)
         }
       }
       return true
     }
-    return textChanged
+    if (!textChanged) {
+      const nonVisual = diffNonVisual(left, right, ctx)
+      return nonVisual
+    }
+    return true
   }
   let changed = alignBlockChildren(left, right, ctx)
   if (hasInlineContent(left) || hasInlineContent(right)) {
@@ -753,7 +1346,114 @@ function diffElement(left: Element, right: Element, ctx: DiffContext): boolean {
     markCellChanged(right)
     return true
   }
+  if (!changed) {
+    changed = diffNonVisual(left, right, ctx)
+  }
   return changed
+}
+
+/**
+ * Marks the media elements whose target changed. The amber block marker alone
+ * is not enough for an image: there is no text to point at, so the changed
+ * media gets an outline of its own.
+ *
+ * The marker is also copied to the outermost ancestor that contains only this
+ * media element. Client-side renderers (Mermaid, PlantUML) replace the `<img>`
+ * with an `<svg>` after the diff is rendered, taking the class away with the
+ * image; the ancestor survives and its `data-adoc-diff-media-changed`
+ * attribute lets `diff-content.css` outline whatever replaced the image.
+ */
+function markMediaChanged(left: Element, right: Element): void {
+  const leftKeys = new Set(mediaKeys(left))
+  const rightKeys = new Set(mediaKeys(right))
+  if (setsEqual(leftKeys, rightKeys)) {
+    return
+  }
+  for (const element of mediaElements(left)) {
+    if (!rightKeys.has(mediaKeyOf(element))) {
+      markMediaElement(element)
+    }
+  }
+  for (const element of mediaElements(right)) {
+    if (!leftKeys.has(mediaKeyOf(element))) {
+      markMediaElement(element)
+    }
+  }
+}
+
+function markMediaElement(element: Element): void {
+  addClass(element, 'adoc-diff-media-changed')
+  // The enclosing block survives a client-side renderer replacing the image,
+  // so it carries the (single) visible icon. `.imageblock > .content > img`
+  // yields `.content`, keeping the icon next to the image instead of at the
+  // top of a whole section that happens to contain it.
+  const host = mediaHost(element)
+  if (host !== undefined) {
+    setAttribute(host, 'data-adoc-diff-media-changed', '')
+  }
+}
+
+const MEDIA_HOST_BOUNDARY_TAGS = new Set(['body', 'html'])
+
+/**
+ * The closest block ancestor of a media element, stopping before the document
+ * shell and `#preview-root`. A paragraph holding several images yields the
+ * paragraph itself: an icon there still says that this block has a changed
+ * image, without touching its unchanged sibling.
+ */
+function mediaHost(element: Element): Element | undefined {
+  let node = element.parentNode
+  while (node !== null && 'tagName' in node) {
+    const host = node as unknown as Element
+    if (
+      MEDIA_HOST_BOUNDARY_TAGS.has(host.tagName) ||
+      getAttribute(host, 'id') === 'preview-root'
+    ) {
+      return undefined
+    }
+    if (BLOCK_TAGS.has(host.tagName)) {
+      return host
+    }
+    node = host.parentNode
+  }
+  return undefined
+}
+
+function mediaKeyOf(element: Element): string {
+  return [
+    element.tagName,
+    getAttribute(element, 'data-adoc-diff-key') ?? '',
+    getAttribute(element, 'alt') ?? '',
+    getAttribute(element, 'title') ?? '',
+    getAttribute(element, 'width') ?? '',
+    getAttribute(element, 'height') ?? '',
+  ].join(':')
+}
+
+function mediaKeys(el: Element): string[] {
+  return mediaElements(el).map(mediaKeyOf)
+}
+
+function mediaElements(el: Element): Element[] {
+  const elements: Element[] = []
+  walk(el, (node) => {
+    if (isElement(node) && MEDIA_NODE_TAGS.has(node.tagName)) {
+      elements.push(node)
+    }
+  })
+  return elements
+}
+
+function setsEqual(left: ReadonlySet<string>, right: ReadonlySet<string>) {
+  if (left.size !== right.size) {
+    return false
+  }
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false
+    }
+  }
+  return true
 }
 
 /**
@@ -959,6 +1659,7 @@ function makeCodeLine(
   marker: string,
   number: number,
   kind?: 'add' | 'del' | 'changed',
+  hunk?: string,
 ): Element {
   const classes = ['adoc-diff-code-line']
   if (kind) {
@@ -968,6 +1669,7 @@ function makeCodeLine(
     { name: 'class', value: classes.join(' ') },
     { name: 'data-marker', value: marker },
     { name: 'data-line-number', value: String(number) },
+    ...(hunk ? [{ name: 'data-adoc-diff-hunk', value: hunk }] : []),
   ])
   for (const node of line.nodes) {
     node.parentNode = span
@@ -979,7 +1681,7 @@ function makeCodeLine(
   return span
 }
 
-function makeCodeGapLine(kind: 'add' | 'del'): Element {
+function makeCodeGapLine(kind: 'add' | 'del', hunk?: string): Element {
   const span = createElement('span', [
     {
       name: 'class',
@@ -987,6 +1689,7 @@ function makeCodeGapLine(kind: 'add' | 'del'): Element {
     },
     { name: 'data-marker', value: '' },
     { name: 'data-line-number', value: '' },
+    ...(hunk ? [{ name: 'data-adoc-diff-hunk', value: hunk }] : []),
   ])
   appendChild(span, createTextNode('\u00a0'))
   return span
@@ -1039,7 +1742,10 @@ function diffCodeLines(
     // or an attribute): mark it as a modified block.
     markChanged(left)
     markChanged(right)
-    ctx.stats.changedBlocks++
+    if (ctx.cellDepth === 0) {
+      ctx.stats.changedBlocks++
+      markVisualHunk(ctx, left, right)
+    }
     return true
   }
 
@@ -1047,21 +1753,40 @@ function diffCodeLines(
   const rightOut: Element[] = []
   let leftNumber = 1
   let rightNumber = 1
+  // A continuous run of added/removed/changed lines is one hunk: consecutive
+  // lines that changed together are reviewed together.
+  let runHunk: string | undefined
+  const hunkForRun = (): string | undefined => {
+    if (ctx.cellDepth > 0) {
+      return undefined
+    }
+    runHunk ??= beginHunk(ctx, 'visual')
+    return runHunk
+  }
   for (const op of ops) {
     if (op.kind === 'equal') {
+      runHunk = undefined
       leftOut.push(makeCodeLine(leftLines[op.left as number], '', leftNumber++))
       rightOut.push(
         makeCodeLine(rightLines[op.right as number], '', rightNumber++),
       )
     } else if (op.kind === 'changed') {
+      const hunk = hunkForRun()
       const leftLine = leftLines[op.left as number]
       const rightLine = rightLines[op.right as number]
-      const leftElement = makeCodeLine(leftLine, '~', leftNumber++, 'changed')
+      const leftElement = makeCodeLine(
+        leftLine,
+        '~',
+        leftNumber++,
+        'changed',
+        hunk,
+      )
       const rightElement = makeCodeLine(
         rightLine,
         '~',
         rightNumber++,
         'changed',
+        hunk,
       )
       applyCodeWordDiff(
         leftElement,
@@ -1072,15 +1797,29 @@ function diffCodeLines(
       leftOut.push(leftElement)
       rightOut.push(rightElement)
     } else if (op.kind === 'removed') {
+      const hunk = hunkForRun()
       leftOut.push(
-        makeCodeLine(leftLines[op.left as number], '−', leftNumber++, 'del'),
+        makeCodeLine(
+          leftLines[op.left as number],
+          '−',
+          leftNumber++,
+          'del',
+          hunk,
+        ),
       )
-      rightOut.push(makeCodeGapLine('del'))
+      rightOut.push(makeCodeGapLine('del', hunk))
     } else {
+      const hunk = hunkForRun()
       rightOut.push(
-        makeCodeLine(rightLines[op.right as number], '+', rightNumber++, 'add'),
+        makeCodeLine(
+          rightLines[op.right as number],
+          '+',
+          rightNumber++,
+          'add',
+          hunk,
+        ),
       )
-      leftOut.push(makeCodeGapLine('add'))
+      leftOut.push(makeCodeGapLine('add', hunk))
     }
   }
 
@@ -1094,7 +1833,9 @@ function diffCodeLines(
   }
   addClass(left, 'adoc-diff-code')
   addClass(right, 'adoc-diff-code')
-  ctx.stats.changedBlocks++
+  if (ctx.cellDepth === 0) {
+    ctx.stats.changedBlocks++
+  }
   return true
 }
 
@@ -1117,14 +1858,20 @@ function diffVerbatim(
   if (leftText.replace(/\s+/g, '') === rightText.replace(/\s+/g, '')) {
     markChanged(left)
     markChanged(right)
-    ctx.stats.changedBlocks++
+    if (ctx.cellDepth === 0) {
+      ctx.stats.changedBlocks++
+      markVisualHunk(ctx, left, right)
+    }
     return true
   }
   const changed = diffInlineTextNodes(left, right, ctx)
   if (!changed) {
     markChanged(left)
     markChanged(right)
-    ctx.stats.changedBlocks++
+    if (ctx.cellDepth === 0) {
+      ctx.stats.changedBlocks++
+      markVisualHunk(ctx, left, right)
+    }
   }
   return true
 }
@@ -1161,11 +1908,29 @@ function estimateBlockLines(el: Element): number {
     return dataLineSpan(el)
   }
   const textLines = isVerbatim(el)
-    ? text.split('\n').length
+    ? countLines(text)
     : Math.max(1, Math.ceil(text.length / 90))
   // A list or a section with many short items may have little text but many
   // source lines; the `data-line-*` span is a better estimate of its height.
-  return Math.max(textLines, dataLineSpan(el))
+  // A code block is usually wrapped in `div.listingblock > .content > pre`,
+  // where the wrapper's own text is short but the `pre` has many lines: count
+  // the `pre` lines too, otherwise a long deleted listing is never collapsed.
+  return Math.max(textLines, dataLineSpan(el), nestedCodeLines(el))
+}
+
+function countLines(text: string): number {
+  return text.split(/\r\n?|\n/).length
+}
+
+function nestedCodeLines(el: Element): number {
+  let lines = 0
+  walk(el, (node) => {
+    if (!isElement(node) || node.tagName !== 'pre') {
+      return
+    }
+    lines = Math.max(lines, countLines(collectText(node)))
+  })
+  return lines
 }
 
 function shouldCollapse(el: Element, options: DiffRenderOptions): boolean {
@@ -1180,14 +1945,47 @@ function shouldCollapse(el: Element, options: DiffRenderOptions): boolean {
   return estimateBlockLines(el) > options.collapseLines
 }
 
+function firstDataLine(el: Element): number | undefined {
+  const own = dataLineOf(el)
+  if (own !== undefined) {
+    return own
+  }
+  let found: number | undefined
+  walk(el, (node) => {
+    if (found !== undefined || !isElement(node)) {
+      return
+    }
+    found = dataLineOf(node)
+  })
+  return found
+}
+
+/** Short, stable-enough identity of a deleted block across re-renders. */
+function hashText(value: string): string {
+  let hash = 5381
+  for (let i = 0; i < value.length; i++) {
+    hash = ((hash << 5) + hash + value.charCodeAt(i)) | 0
+  }
+  return (hash >>> 0).toString(36)
+}
+
+function excerptOf(value: string, limit = 60): string {
+  const text = value.replace(/\s+/g, ' ').trim()
+  return text.length > limit ? `${text.slice(0, limit).trimEnd()}…` : text
+}
+
 function collapseBlock(el: Element, ctx: DiffContext): void {
   addClass(el, 'adoc-diff-collapsed')
   setAttribute(el, 'data-adoc-diff-collapsed', `c${ctx.nextCollapse++}`)
-  setAttribute(
-    el,
-    'data-adoc-diff-collapse-lines',
-    String(estimateBlockLines(el)),
-  )
+  const lines = estimateBlockLines(el)
+  setAttribute(el, 'data-adoc-diff-collapse-lines', String(lines))
+  // The expanded state must survive a live re-render, where the positional
+  // `cN` id and the DOM order can change. A source line plus an excerpt hash is
+  // stable as long as the deleted block itself is.
+  const line = firstDataLine(el) ?? 0
+  const text = elementText(el)
+  setAttribute(el, 'data-adoc-diff-collapse-key', `${line}:${hashText(text)}`)
+  setAttribute(el, 'data-adoc-diff-collapse-excerpt', excerptOf(text))
 }
 
 function addGapMarker(el: Element, attribute: string, kind: string): void {
@@ -1199,35 +1997,106 @@ function addGapMarker(el: Element, attribute: string, kind: string): void {
   }
 }
 
+interface GapDetails {
+  readonly count: number
+  readonly object?: 'table' | 'lines'
+  readonly hunk?: string
+}
+
+function applyGapDetails(el: Element, details: GapDetails): void {
+  if (getAttribute(el, 'data-adoc-diff-gap-count') === undefined) {
+    setAttribute(el, 'data-adoc-diff-gap-count', String(details.count))
+  }
+  if (details.object !== undefined) {
+    setAttribute(el, 'data-adoc-diff-gap-object', details.object)
+  }
+  if (details.hunk !== undefined) {
+    assignHunk(el, details.hunk)
+  }
+}
+
 function markGap(
   side: 'left' | 'right',
   parent: Element,
   nextPaired: Alignment | undefined,
   previousPaired: Alignment | undefined,
   kind: string,
+  details: GapDetails,
 ): void {
   const nextElement = side === 'left' ? nextPaired?.left : nextPaired?.right
   if (nextElement) {
     addGapMarker(nextElement, 'data-adoc-diff-gap', kind)
+    applyGapDetails(nextElement, details)
     return
   }
   const previousElement =
     side === 'left' ? previousPaired?.left : previousPaired?.right
   if (previousElement) {
     addGapMarker(previousElement, 'data-adoc-diff-gap-after', kind)
+    applyGapDetails(previousElement, details)
     return
   }
   addGapMarker(parent, 'data-adoc-diff-gap-after', kind)
+  applyGapDetails(parent, details)
+}
+
+/**
+ * A gap label describes what is missing on the other side: a number of blocks,
+ * or the rows of a table that was removed as a whole.
+ */
+function isCodeContainer(el: Element): boolean {
+  if (isVerbatim(el)) {
+    return true
+  }
+  return (
+    hasClass(el, 'listingblock') ||
+    hasClass(el, 'literalblock') ||
+    hasClass(el, 'sourceblock')
+  )
+}
+
+function gapDetails(
+  elements: readonly Element[],
+  hunk: string | undefined,
+): GapDetails {
+  if (elements.length === 1 && isDataTable(elements[0])) {
+    return { count: rowsOf(elements[0]).length, object: 'table', hunk }
+  }
+  if (elements.length === 1) {
+    // A collapsed deleted block knows how many lines it hides; an expanded code
+    // block can be measured. The label on the other side can then say
+    // "8 removed lines" instead of "1 removed block".
+    const lines = getAttribute(elements[0], 'data-adoc-diff-collapse-lines')
+    if (lines !== undefined) {
+      const count = Number(lines)
+      if (Number.isFinite(count) && count > 0) {
+        return { count, object: 'lines', hunk }
+      }
+    }
+    // Only a code block itself is described by its lines. A section that
+    // happens to contain a one-line listing is a block: labelling an added
+    // section "1 added line" sends the reader looking for a missing line.
+    if (isCodeContainer(elements[0])) {
+      const codeLines = nestedCodeLines(elements[0])
+      if (codeLines > 0) {
+        return { count: codeLines, object: 'lines', hunk }
+      }
+    }
+  }
+  return { count: elements.length, hunk }
 }
 
 /**
  * Handles a run of blocks that exist on one side only.
  *
  * - Short removed blocks stay visible (red) and the other side receives a gap.
- * - Long removed blocks are collapsed into a `−N` strip; they keep zero height,
- *   so the other side needs no gap. Expanding one is a client-side toggle and
- *   the residual alignment pass adds the needed space again.
+ * - Long removed blocks are collapsed into a `−N` strip. The strip still takes
+ *   a few pixels, and the other side still receives a compact gap marker, so a
+ *   reader of the new version sees that something was deleted there.
  * - Added blocks always stay visible (green) and the old side receives a gap.
+ *
+ * A continuous run is one hunk, marked on the first block of the run and on the
+ * gap carrier of the other side.
  */
 function processUnmatchedRun(
   run: readonly Alignment[],
@@ -1250,23 +2119,43 @@ function processUnmatchedRun(
       rightOnly.push(item.right)
     }
   }
-
-  const visibleLeft: Element[] = []
+  if (leftOnly.length === 0 && rightOnly.length === 0) {
+    return false
+  }
+  const hunk = beginHunk(ctx, 'visual')
+  if (leftOnly[0]) {
+    assignHunk(leftOnly[0], hunk)
+  }
+  if (rightOnly[0]) {
+    assignHunk(rightOnly[0], hunk)
+  }
   for (const el of leftOnly) {
     if (ctx.options.align && shouldCollapse(el, ctx.options)) {
       collapseBlock(el, ctx)
-    } else {
-      visibleLeft.push(el)
     }
   }
 
   if (ctx.options.align && rightOnly.length > 0) {
-    markGap('left', leftParent, nextPaired, previousPaired, 'ins')
+    markGap(
+      'left',
+      leftParent,
+      nextPaired,
+      previousPaired,
+      'ins',
+      gapDetails(rightOnly, hunk),
+    )
   }
-  if (ctx.options.align && visibleLeft.length > 0) {
-    markGap('right', rightParent, nextPaired, previousPaired, 'del')
+  if (ctx.options.align && leftOnly.length > 0) {
+    markGap(
+      'right',
+      rightParent,
+      nextPaired,
+      previousPaired,
+      'del',
+      gapDetails(leftOnly, hunk),
+    )
   }
-  return leftOnly.length > 0 || rightOnly.length > 0
+  return true
 }
 
 function alignBlockChildren(
@@ -1274,7 +2163,8 @@ function alignBlockChildren(
   right: Element,
   ctx: DiffContext,
 ): boolean {
-  const pairs = alignElements(blockChildren(left), blockChildren(right))
+  const aligned = alignElements(blockChildren(left), blockChildren(right))
+  const { pairs, moved } = extractMovedBlocks(aligned)
   // Anchors are assigned before recursion so every matched block participates
   // in the client-side measurement, including unchanged blocks between two
   // changes.
@@ -1287,6 +2177,10 @@ function alignBlockChildren(
   }
 
   let changed = false
+  for (const move of moved) {
+    markMovedBlock(ctx, move.left, move.right)
+    changed = true
+  }
   let previousPaired: Alignment | undefined
   let index = 0
   while (index < pairs.length) {
@@ -1294,6 +2188,9 @@ function alignBlockChildren(
     if (pair.left && pair.right) {
       if (pair.unchanged) {
         collectLinePairs(pair.left, pair.right, ctx)
+        if (diffNonVisual(pair.left, pair.right, ctx)) {
+          changed = true
+        }
       } else if (diffElement(pair.left, pair.right, ctx)) {
         changed = true
       }
@@ -1386,7 +2283,11 @@ function columnSignature(model: TableModel, index: number): string {
     .join('\u0001')
 }
 
-function pairColumnRuns(raw: readonly ColumnPair[]): ColumnPair[] {
+function pairColumnRuns(
+  raw: readonly ColumnPair[],
+  leftSignatures: readonly string[],
+  rightSignatures: readonly string[],
+): ColumnPair[] {
   const out: ColumnPair[] = []
   let index = 0
   while (index < raw.length) {
@@ -1410,12 +2311,108 @@ function pairColumnRuns(raw: readonly ColumnPair[]): ColumnPair[] {
       }
       index++
     }
-    const count = Math.max(left.length, right.length)
-    for (let i = 0; i < count; i++) {
-      out.push({ left: left[i], right: right[i] })
-    }
+    out.push(...pairColumnRun(left, right, leftSignatures, rightSignatures))
   }
   return out
+}
+
+/**
+ * Pairs a run of one-sided columns by content, not by order.
+ *
+ * A column inserted before a column that also changed (a new `Severity` column
+ * before `Status`, whose cells changed) used to pair the old `Status` with the
+ * new `Severity`: every cell then looked modified, the old `Status` and the new
+ * `Status` were painted as added/removed, and the reviewer read the wrong
+ * "before" and "after". The header is part of the column signature, so the
+ * similarity pairs `Status` with `Status` and leaves `Severity` one-sided.
+ */
+function pairColumnRun(
+  left: readonly number[],
+  right: readonly number[],
+  leftSignatures: readonly string[],
+  rightSignatures: readonly string[],
+): ColumnPair[] {
+  const paired = new Map<number, number>()
+  const usedRight = new Set<number>()
+  const candidates: Array<{ left: number; right: number; score: number }> = []
+  for (const leftIndex of left) {
+    for (const rightIndex of right) {
+      const score = textSimilarity(
+        columnWords(leftSignatures[leftIndex]),
+        columnWords(rightSignatures[rightIndex]),
+      )
+      if (score >= SIMILARITY_THRESHOLD) {
+        candidates.push({ left: leftIndex, right: rightIndex, score })
+      }
+    }
+  }
+  candidates.sort(
+    (a, b) => b.score - a.score || a.left - b.left || a.right - b.right,
+  )
+  for (const candidate of candidates) {
+    if (paired.has(candidate.left) || usedRight.has(candidate.right)) {
+      continue
+    }
+    paired.set(candidate.left, candidate.right)
+    usedRight.add(candidate.right)
+  }
+
+  const remainingLeft = left.filter((index) => !paired.has(index))
+  const remainingRight = right.filter((index) => !usedRight.has(index))
+  if (remainingLeft.length === remainingRight.length) {
+    for (let index = 0; index < remainingLeft.length; index++) {
+      paired.set(remainingLeft[index], remainingRight[index])
+      usedRight.add(remainingRight[index])
+    }
+  }
+
+  const entries: Array<{ pair: ColumnPair; key: number; order: number }> = []
+  let order = 0
+  for (const [leftIndex, rightIndex] of paired) {
+    entries.push({
+      pair: { left: leftIndex, right: rightIndex },
+      key: rightIndex,
+      order: order++,
+    })
+  }
+  for (const rightIndex of right) {
+    if (!usedRight.has(rightIndex)) {
+      entries.push({
+        pair: { right: rightIndex },
+        key: rightIndex,
+        order: order++,
+      })
+    }
+  }
+  const leftOrder = new Map(left.map((value, index) => [value, index]))
+  for (const leftIndex of left) {
+    if (paired.has(leftIndex)) {
+      continue
+    }
+    const position = leftOrder.get(leftIndex) ?? 0
+    let nextKey: number | undefined
+    for (let next = position + 1; next < left.length; next++) {
+      const rightIndex = paired.get(left[next])
+      if (rightIndex !== undefined) {
+        nextKey = rightIndex
+        break
+      }
+    }
+    entries.push({
+      pair: { left: leftIndex },
+      key:
+        nextKey !== undefined
+          ? nextKey - 0.5 + position * 1e-6
+          : right.length + 1 + position * 1e-6,
+      order: order++,
+    })
+  }
+  entries.sort((a, b) => a.key - b.key || a.order - b.order)
+  return entries.map((entry) => entry.pair)
+}
+
+function columnWords(signature: string): string {
+  return signature.split('\u0001').join(' ')
 }
 
 function alignColumnIndices(
@@ -1449,8 +2446,8 @@ function alignColumnIndices(
     }
   }
   // A changed column is a replacement, not a removal plus an addition: pair
-  // the one-sided entries of each run by order.
-  return pairColumnRuns(raw)
+  // the one-sided entries of each run by content.
+  return pairColumnRuns(raw, leftSignatures, rightSignatures)
 }
 
 function createColumnGapCell(row: Element, kind: string, colspan = 1): Element {
@@ -1654,7 +2651,7 @@ function insertRowPlaceholder(
   sourceRow: Element,
   columns: number,
   kind: 'ins' | 'del',
-): void {
+): Element {
   const sourceSection = sourceRow.parentNode as ChildNode | null
   const sectionTag =
     sourceSection &&
@@ -1690,6 +2687,33 @@ function insertRowPlaceholder(
       : section.childNodes.length
   row.parentNode = section
   section.childNodes.splice(index, 0, row)
+  return row
+}
+
+/**
+ * The visual layout of a table: its own width style and the columns' widths and
+ * styles. A width change has no word to wrap, so without this it would be
+ * invisible while still being a real visual difference.
+ */
+function tableLayoutSignature(table: Element): string {
+  const parts: string[] = [
+    `table:${getAttribute(table, 'style') ?? ''};${getAttribute(table, 'width') ?? ''}`,
+  ]
+  for (const child of table.childNodes) {
+    if (!isElement(child) || child.tagName !== 'colgroup') {
+      continue
+    }
+    parts.push(`group:${getAttribute(child, 'style') ?? ''}`)
+    for (const col of child.childNodes) {
+      if (!isElement(col) || col.tagName !== 'col') {
+        continue
+      }
+      parts.push(
+        `col:${getAttribute(col, 'width') ?? ''};${getAttribute(col, 'style') ?? ''}`,
+      )
+    }
+  }
+  return parts.join('|')
 }
 
 function diffTable(left: Element, right: Element, ctx: DiffContext): boolean {
@@ -1697,7 +2721,6 @@ function diffTable(left: Element, right: Element, ctx: DiffContext): boolean {
     return diffTablePlain(left, right, ctx)
   }
   recordLinePair(left, right, ctx)
-  ctx.stats.changedTables++
 
   const leftModel = buildTableModel(left)
   const rightModel = buildTableModel(right)
@@ -1715,6 +2738,9 @@ function diffTable(left: Element, right: Element, ctx: DiffContext): boolean {
   const columnPairs = alignColumnIndices(leftSignatures, rightSignatures)
   const leftWidths = columnWidths(left)
   const rightWidths = columnWidths(right)
+  // Compare the layout before the union grid replaces the `colgroup`s.
+  const layoutChanged =
+    tableLayoutSignature(left) !== tableLayoutSignature(right)
   const leftStructural = rebuildTableColumns(
     left,
     leftModel,
@@ -1729,9 +2755,29 @@ function diffTable(left: Element, right: Element, ctx: DiffContext): boolean {
     'right',
     leftWidths,
   )
-  let structural = leftStructural || rightStructural
+  const columnStructural = leftStructural || rightStructural
+  let structural = columnStructural
+  let tableChanged = false
+  let tableHunk: string | undefined
+  const ensureTableHunk = (): void => {
+    tableChanged = true
+    if (tableHunk !== undefined) {
+      return
+    }
+    tableHunk = beginHunk(ctx, 'visual')
+    assignHunk(left, tableHunk)
+    assignHunk(right, tableHunk)
+  }
 
-  diffCaption(left, right, ctx)
+  if (layoutChanged) {
+    markChanged(left)
+    markChanged(right)
+    ensureTableHunk()
+  }
+
+  if (diffCaption(left, right, ctx)) {
+    tableChanged = true
+  }
 
   const leftRows = rowsOf(left)
   const rightRows = rowsOf(right)
@@ -1746,41 +2792,57 @@ function diffTable(left: Element, right: Element, ctx: DiffContext): boolean {
   for (let i = 0; i < pairs.length; i++) {
     const pair = pairs[i]
     if (pair.left && pair.right) {
-      if (!pair.unchanged) {
-        const row = diffRowGrid(
-          leftAfter,
-          leftRowIndex.get(pair.left) as number,
-          rightAfter,
-          rightRowIndex.get(pair.right) as number,
-          columnPairs.length,
-          ctx,
-        )
-        if (row.structural) {
-          structural = true
+      if (pair.unchanged) {
+        if (diffNonVisual(pair.left, pair.right, ctx)) {
+          tableChanged = true
         }
+        continue
+      }
+      const row = diffRowGrid(
+        leftAfter,
+        leftRowIndex.get(pair.left) as number,
+        rightAfter,
+        rightRowIndex.get(pair.right) as number,
+        columnPairs.length,
+        ctx,
+      )
+      if (row.structural) {
+        structural = true
+      }
+      // One changed row is one hunk: a changed cell does not add a second one.
+      // When the change is a column insertion, the table itself owns the hunk.
+      if (row.changed || (row.structural && !columnStructural)) {
+        markHunk(ctx, 'visual', pair.left, pair.right)
+        tableChanged = true
+      } else if (row.nonVisual) {
+        tableChanged = true
       }
     } else if (pair.left) {
       addClass(pair.left, 'adoc-diff-row-del')
       ctx.stats.removedBlocks++
       structural = true
-      insertRowPlaceholder(
+      const placeholder = insertRowPlaceholder(
         right,
         nextRowOnSide(pairs, i, 'right'),
         pair.left,
         columnPairs.length,
         'del',
       )
+      markHunk(ctx, 'visual', pair.left, placeholder)
+      tableChanged = true
     } else if (pair.right) {
       addClass(pair.right, 'adoc-diff-row-ins')
       ctx.stats.addedBlocks++
       structural = true
-      insertRowPlaceholder(
+      const placeholder = insertRowPlaceholder(
         left,
         nextRowOnSide(pairs, i, 'left'),
         pair.right,
         columnPairs.length,
         'ins',
       )
+      markHunk(ctx, 'visual', placeholder, pair.right)
+      tableChanged = true
     }
   }
 
@@ -1788,12 +2850,28 @@ function diffTable(left: Element, right: Element, ctx: DiffContext): boolean {
     addClass(left, 'adoc-diff-table-del')
     addClass(right, 'adoc-diff-table-ins')
   }
-  return true
+  if (tableChanged) {
+    ctx.stats.changedTables++
+  }
+  return tableChanged
 }
 
 interface RowDiff {
   changed: boolean
   structural: boolean
+  nonVisual: boolean
+}
+
+function sameCellAcrossRows(
+  leftCell: TableCellInfo | undefined,
+  rightCell: TableCellInfo | undefined,
+  leftRowIndex: number,
+  rightRowIndex: number,
+): boolean {
+  return (
+    (leftCell !== undefined && leftCell.row !== leftRowIndex) ||
+    (rightCell !== undefined && rightCell.row !== rightRowIndex)
+  )
 }
 
 function diffRowGrid(
@@ -1806,6 +2884,7 @@ function diffRowGrid(
 ): RowDiff {
   let changed = false
   let structural = false
+  let nonVisual = false
   const seenLeft = new Set<Element>()
   const seenRight = new Set<Element>()
   for (let column = 0; column < columnCount; column++) {
@@ -1814,10 +2893,7 @@ function diffRowGrid(
     if (!leftCell && !rightCell) {
       continue
     }
-    if (
-      (leftCell && leftCell.row !== leftRowIndex) ||
-      (rightCell && rightCell.row !== rightRowIndex)
-    ) {
+    if (sameCellAcrossRows(leftCell, rightCell, leftRowIndex, rightRowIndex)) {
       // A rowspan from an earlier row. A difference in rowspan structure is a
       // structural change; the content itself was compared at its anchor row.
       if (Boolean(leftCell) !== Boolean(rightCell)) {
@@ -1846,14 +2922,23 @@ function diffRowGrid(
     if (cellAttributesDiffer(leftCell.element, rightCell.element)) {
       structural = true
     }
-    if (diffElement(leftCell.element, rightCell.element, ctx)) {
+    ctx.cellDepth++
+    let cellChanged = false
+    try {
+      cellChanged = diffElement(leftCell.element, rightCell.element, ctx)
+    } finally {
+      ctx.cellDepth--
+    }
+    if (cellChanged) {
       markCellChanged(leftCell.element)
       markCellChanged(rightCell.element)
       ctx.stats.changedCells++
       changed = true
+    } else if (diffNonVisual(leftCell.element, rightCell.element, ctx)) {
+      nonVisual = true
     }
   }
-  return { changed, structural }
+  return { changed, structural, nonVisual }
 }
 
 function diffTablePlain(
@@ -1862,29 +2947,62 @@ function diffTablePlain(
   ctx: DiffContext,
 ): boolean {
   recordLinePair(left, right, ctx)
-  ctx.stats.changedTables++
   const leftModel = buildTableModel(left)
   const rightModel = buildTableModel(right)
   let structural = leftModel.columns !== rightModel.columns
+  let tableChanged = false
+  let tableHunk: string | undefined
+  const ensureTableHunk = (): void => {
+    tableChanged = true
+    if (tableHunk !== undefined) {
+      return
+    }
+    tableHunk = beginHunk(ctx, 'visual')
+    assignHunk(left, tableHunk)
+    assignHunk(right, tableHunk)
+  }
 
-  diffCaption(left, right, ctx)
+  if (tableLayoutSignature(left) !== tableLayoutSignature(right)) {
+    markChanged(left)
+    markChanged(right)
+    ensureTableHunk()
+  }
+
+  if (diffCaption(left, right, ctx)) {
+    tableChanged = true
+  }
 
   const pairs = alignElements(rowsOf(left), rowsOf(right))
   for (const pair of pairs) {
     if (pair.left && pair.right) {
-      if (!pair.unchanged) {
-        if (diffRowPlain(pair.left, pair.right, ctx)) {
-          structural = true
+      if (pair.unchanged) {
+        if (diffNonVisual(pair.left, pair.right, ctx)) {
+          tableChanged = true
         }
+        continue
+      }
+      const row = diffRowPlain(pair.left, pair.right, ctx)
+      if (row.changed || row.structural) {
+        markHunk(ctx, 'visual', pair.left, pair.right)
+        tableChanged = true
+      } else if (row.nonVisual) {
+        tableChanged = true
+      }
+      if (row.structural) {
+        structural = true
       }
     } else if (pair.left) {
       addClass(pair.left, 'adoc-diff-row-del')
       ctx.stats.removedBlocks++
       structural = true
+      markHunk(ctx, 'visual', pair.left)
+      tableChanged = true
     } else if (pair.right) {
       addClass(pair.right, 'adoc-diff-row-ins')
       ctx.stats.addedBlocks++
       structural = true
+      markHunk(ctx, 'visual', undefined, pair.right)
+      tableChanged = true
     }
   }
 
@@ -1892,53 +3010,76 @@ function diffTablePlain(
     addClass(left, 'adoc-diff-table-del')
     addClass(right, 'adoc-diff-table-ins')
   }
-  return true
+  if (tableChanged) {
+    ctx.stats.changedTables++
+  }
+  return tableChanged
 }
 
 function diffRowPlain(
   left: Element,
   right: Element,
   ctx: DiffContext,
-): boolean {
+): RowDiff {
   const leftCells = cellsOf(left)
   const rightCells = cellsOf(right)
   let changed = leftCells.length !== rightCells.length
+  let structural = leftCells.length !== rightCells.length
+  let nonVisual = false
   const count = Math.max(leftCells.length, rightCells.length)
   for (let index = 0; index < count; index++) {
     const leftCell = leftCells[index]
     const rightCell = rightCells[index]
     if (leftCell && rightCell) {
-      if (diffElement(leftCell, rightCell, ctx)) {
+      ctx.cellDepth++
+      let cellChanged = false
+      try {
+        cellChanged = diffElement(leftCell, rightCell, ctx)
+      } finally {
+        ctx.cellDepth--
+      }
+      if (cellChanged) {
         markCellChanged(leftCell)
         markCellChanged(rightCell)
         ctx.stats.changedCells++
         changed = true
+      } else if (diffNonVisual(leftCell, rightCell, ctx)) {
+        nonVisual = true
       }
     } else if (leftCell) {
       addClass(leftCell, 'adoc-diff-cell-del')
       ctx.stats.removedBlocks++
       changed = true
+      structural = true
     } else if (rightCell) {
       addClass(rightCell, 'adoc-diff-cell-ins')
       ctx.stats.addedBlocks++
       changed = true
+      structural = true
     }
   }
-  return changed
+  return { changed, structural, nonVisual }
 }
 
-function diffCaption(left: Element, right: Element, ctx: DiffContext): void {
+function diffCaption(left: Element, right: Element, ctx: DiffContext): boolean {
   const leftCaption = firstChildTag(left, 'caption')
   const rightCaption = firstChildTag(right, 'caption')
   if (leftCaption && rightCaption) {
-    diffElement(leftCaption, rightCaption, ctx)
-  } else if (leftCaption) {
+    return diffElement(leftCaption, rightCaption, ctx)
+  }
+  if (leftCaption) {
     markWhole(leftCaption, 'left')
     ctx.stats.removedBlocks++
-  } else if (rightCaption) {
+    markHunk(ctx, 'visual', leftCaption)
+    return true
+  }
+  if (rightCaption) {
     markWhole(rightCaption, 'right')
     ctx.stats.addedBlocks++
+    markHunk(ctx, 'visual', undefined, rightCaption)
+    return true
   }
+  return false
 }
 
 function rowsOf(table: Element): Element[] {

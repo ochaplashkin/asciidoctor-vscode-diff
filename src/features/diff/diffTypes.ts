@@ -3,12 +3,10 @@
  *
  * The types used by the vscode-free diff kernel (`DiffRenderResult`,
  * `DiffLineMapEntry`, `DiffStats`) live here so both the kernel and the
- * extension host can import them. `DiffPair` references `vscode.Uri` through a
- * type-only import, which is erased at compile time and therefore safe for the
- * vscode-free modules that import the rest of this file.
+ * extension host can import them. `DiffPanelState` references the URIs as
+ * strings, so this module stays free of runtime vscode imports.
  */
 
-import type { Uri } from 'vscode'
 import type { DiffStats } from './blockDiff.js'
 import type { DiffLineMapEntry } from './diffLineMap.js'
 
@@ -21,11 +19,6 @@ export type {
 export type { DiffLineMapEntry } from './diffLineMap.js'
 
 export type DiffSide = 'left' | 'right'
-
-export interface DiffPair {
-  readonly left: Uri
-  readonly right: Uri
-}
 
 export interface DiffRenderResult {
   /** Full HTML of the left preview document, with diff markers. */
@@ -43,8 +36,42 @@ export interface DiffPanelState {
   readonly left: string
   readonly right: string
   readonly ratio?: number
+  /** Top source line of each pane at the last scroll. */
+  readonly leftLine?: number
+  readonly rightLine?: number
+  /** Collapse keys of deleted blocks the reader expanded. */
+  readonly expanded?: readonly string[]
   readonly column?: number
 }
+
+/** Webview → extension messages. */
+export interface DiffDidScrollMessage {
+  readonly type: 'didScroll'
+  readonly ratio?: number
+  readonly leftLine?: number
+  readonly rightLine?: number
+}
+
+export interface DiffSwapMessage {
+  readonly type: 'swap'
+}
+
+export interface DiffSetExpandedMessage {
+  readonly type: 'setExpanded'
+  readonly keys?: readonly string[]
+}
+
+export interface DiffOpenLinkMessage {
+  readonly type: 'openLink'
+  readonly href?: string
+  readonly side?: DiffSide
+}
+
+export type DiffFromWebviewMessage =
+  | DiffDidScrollMessage
+  | DiffSwapMessage
+  | DiffSetExpandedMessage
+  | DiffOpenLinkMessage
 
 /** Extension → webview messages. */
 export interface DiffSetBusyMessage {

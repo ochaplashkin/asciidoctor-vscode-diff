@@ -3,6 +3,39 @@
 > This fork starts its own versioning at 1.0.0. The entries that follow this section are
 > inherited from the upstream [AsciiDoc extension](https://github.com/asciidoctor/asciidoctor-vscode).
 
+## 1.1.0 (2026-11-13)
+
+### Improvements
+
+* Turn the comparison header into a change navigator: it counts the change regions ("hunks") the reviewer can actually visit, shows the current one as `3 / 12`, goes to the next change on click and to the previous one with Shift+click, expands a collapsed deletion on the way and briefly outlines the target. The detailed `+added −removed ~changed` numbers move to the tooltip, and the navigator stays available when `asciidoc.diff.showStats` is disabled
+* Preserve the review context across live updates: the reading position is restored by source line in each pane, expanded deleted blocks stay expanded, and a save that does not change the rendered output no longer reloads the document. A comparison panel that was hidden while the document changed catches up as soon as it is shown again
+* Report a generated table-of-contents-only change, for example after changing `:toclevels:`, as a navigation change instead of silently reporting "No differences"; the generated TOC is no longer compared as content, so a changed heading is not counted twice. The TOC itself is not rendered in either pane and no longer reserves 15–20em of width, so the rendered text uses the full pane
+* Report formatting-only, link-target and anchor-id changes instead of claiming "No differences": the header says "No visual text differences" and the affected block gets a small badge whose tooltip explains what changed
+* Show the parent directory when both files have the same name (`v1/index.adoc`, `v2/index.adoc`), so two versions of the same document can be told apart. The full path is in the tooltip
+* Mark a changed block that has no word or code-line marker of its own (a different image, a changed formula, a table width or a structural table change) with a small `~` icon in the left margin and a localized tooltip, instead of an amber strip or outline. Text blocks keep only their word highlights, so the comparison stays quiet
+* Keep the green/red highlighting for added and removed content, but draw the empty space that reserves the same room on the other side (the gap, placeholder row/column and code gap line) in neutral gray, so a change is colored once instead of twice
+* Draw the empty side of an added or removed block as a plain neutral gray gap, without a count label, and keep the marker of a collapsed deletion on the new side as well
+* Keep the previous change summary visible while a live render runs, and show `Rendering…` only when it takes longer than a moment
+* Intercept links in the comparison: an in-page `#anchor` scrolls its own pane instead of the other one, and other links open in the editor or the browser instead of navigating the webview away from the diff
+
+### Bug fixes
+
+* Make the *Swap* button work again: clicking it posts the swap request to the extension host, which re-renders the two sides in the other order. The client handler had been dropped while the header was turned into a navigator
+* Keep the change icon on a changed Mermaid or PlantUML diagram after the browser renders it: the icon is drawn on the stable container instead of disappearing with the replaced image
+* Keep formulas typeset in the comparison: a changed formula is marked on its block instead of wrapping characters inside its delimiters, which splits the source and leaves MathJax unable to render it
+* Show a reordered section as one "moved" region instead of a deletion plus an addition, and never collapse it, so a permutation no longer looks like a rewrite
+* Warn in the comparison header when the two documents were rendered with different preview shells (doctype, table-of-contents placement, preview style): the combined page can only apply one shell, so the other document may not get all of its own styling
+* Make the table-of-contents-only status clickable: it scrolls both panes to the TOC without adding a change region to `i / N`
+* Count a changed table cell once instead of three times: a cell no longer counts as a changed block, and a table is counted only when something actually changed. A changed table width is reported as one visible change instead of a phantom counter
+* Collapse a long deleted code block correctly, even when it is wrapped in AsciiDoc's `listingblock`/`content` containers, and show how many lines it hides
+* Report the same hunk identifiers on both sides of a paired change, and reuse the hunk identifier for the gap of an added or removed run, so the navigator does not point at a missing target
+* Ship the localization bundles in the VSIX, so the comparison UI is translated into German, French and Japanese instead of falling back to English: the `l10n` field of `package.json` pointed to a folder that was not packaged
+* Package the browser entry with the `commonjs` module type it is bundled as, instead of copying the source `package.json` (`"type": "module"`) over it, so VS Code for the Web loads the extension
+
+### Infrastructure
+
+* Run the Extension Host tests when the test process is itself started from Electron: the inherited `ELECTRON_RUN_AS_NODE` variable no longer makes the VS Code binary treat the test workspace as a Node script
+
 ## 1.0.0 (2026-11-13)
 
 First independent release, based on the upstream AsciiDoc for VS Code 4.3.1 development

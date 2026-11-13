@@ -27,11 +27,19 @@ describe('renderDiff', () => {
     assert.doesNotMatch(result.leftHtml, /adoc-diff/)
     assert.doesNotMatch(result.rightHtml, /adoc-diff/)
     assert.deepEqual(result.stats, {
+      changes: 0,
+      visualChanges: 0,
+      nonVisualChanges: 0,
       addedBlocks: 0,
       removedBlocks: 0,
+      movedBlocks: 0,
       changedBlocks: 0,
       changedTables: 0,
       changedCells: 0,
+      formattingChanges: 0,
+      linkChanges: 0,
+      idChanges: 0,
+      navigationChanges: 0,
     })
   })
 
@@ -271,7 +279,11 @@ describe('renderDiff', () => {
     )
     assert.match(result.leftHtml, /adoc-diff-collapsed/)
     assert.match(result.leftHtml, /data-adoc-diff-collapse-lines="\d+"/)
-    assert.doesNotMatch(result.rightHtml, /data-adoc-diff-gap="del"/)
+    assert.match(result.leftHtml, /data-adoc-diff-collapse-key="/)
+    assert.match(result.leftHtml, /data-adoc-diff-collapse-excerpt="/)
+    // The reader of the new version must see that something was deleted there.
+    assert.match(result.rightHtml, /data-adoc-diff-gap="del"/)
+    assert.match(result.rightHtml, /data-adoc-diff-gap-count="\d+"/)
   })
 
   test('assigns matching anchors to both sides of a change', () => {
@@ -350,6 +362,66 @@ describe('renderDiff', () => {
     assert.match(result.rightHtml, /adoc-diff-block-ins/)
     assert.doesNotMatch(result.leftHtml, /data-adoc-diff-anchor/)
     assert.doesNotMatch(result.leftHtml, /data-adoc-diff-gap/)
+  })
+
+  test('pairs an existing table column with itself when a column is inserted before it', () => {
+    const table = (widths: string, header: string, rows: string) =>
+      `<table class="tableblock"><colgroup>${widths}</colgroup><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`
+    const result = diff(
+      table(
+        '<col width="33%"><col width="33%"><col width="33%">',
+        '<th>Name</th><th>Count</th><th>Status</th>',
+        '<tr><td>alpha</td><td>1</td><td>ready</td></tr><tr><td>beta</td><td>2</td><td>draft</td></tr>',
+      ),
+      table(
+        '<col width="20%"><col width="20%"><col width="20%"><col width="20%"><col width="20%">',
+        '<th>Name</th><th>Count</th><th>Severity</th><th>Status</th><th>Owner</th>',
+        '<tr><td>alpha</td><td>1</td><td>high</td><td>ready</td><td>ann</td></tr><tr><td>beta</td><td>2</td><td>low</td><td>published</td><td>bob</td></tr>',
+      ),
+    )
+    const headers = (html: string) =>
+      [...html.matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map((match) =>
+        match[1].replace(/<[^>]+>/g, '').trim(),
+      )
+    // The old `Status` must stay aligned with the new `Status`; `Severity` and
+    // `Owner` are the one-sided columns, not a shifted `Status`.
+    assert.deepEqual(headers(result.leftHtml), [
+      'Name',
+      'Count',
+      '',
+      'Status',
+      '',
+    ])
+    assert.deepEqual(headers(result.rightHtml), [
+      'Name',
+      'Count',
+      'Severity',
+      'Status',
+      'Owner',
+    ])
+    // A changed cell in the aligned `Status` column is a word diff, not a
+    // wholesale column removal/addition.
+    assert.match(result.leftHtml, /draft/)
+    assert.match(result.rightHtml, /published/)
+    assert.match(result.leftHtml, /adoc-diff-word adoc-diff-word-del/)
+    assert.match(result.rightHtml, /adoc-diff-word adoc-diff-word-ins/)
+    assert.equal(result.stats.changedTables, 1)
+  })
+
+  test('reports a TOC-only change as navigation, not as "No differences"', () => {
+    const withToc = (entry: string) =>
+      `<div id="header"><h1>Manual</h1><div id="toc" class="toc2"><ul><li><a href="#_one">${entry}</a></li></ul></div></div><div id="content"><p>A</p></div>`
+    const result = diff(withToc('Old heading'), withToc('New heading'))
+    // The TOC itself is not a content hunk (it is generated and would double
+    // every heading change), but a TOC-only difference is still reported.
+    assert.equal(result.stats.changes, 0)
+    assert.equal(result.stats.navigationChanges, 1)
+    assert.equal(result.stats.addedBlocks, 0)
+    assert.equal(result.stats.removedBlocks, 0)
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-(block|word|hunk)/)
+    assert.doesNotMatch(result.rightHtml, /adoc-diff-(block|word|hunk)/)
+    assert.match(result.leftHtml, /data-adoc-diff-navigation="changed"/)
+    assert.match(result.rightHtml, /data-adoc-diff-navigation="changed"/)
   })
 
   test('does not build a table grid when alignment is disabled', () => {
@@ -463,5 +535,46 @@ describe('renderDiff', () => {
       { leftLine: 1, rightLine: 1 },
       { leftLine: 2, rightLine: 4 },
     ])
+  })
+
+  test('does not split a formula with word markers', () => {
+    const formula = (value: string) =>
+      `<div class="stemblock data-line-1"><div class="content">\\(a^2 + b^2 = ${value}\\)</div></div>`
+    const result = diff(formula('c^2'), formula('c^3'))
+    // MathJax finds a formula by its delimiters in one text node: wrapping a
+    // character inside it would leave the formula unrendered.
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-word/)
+    assert.doesNotMatch(result.rightHtml, /adoc-diff-word/)
+    assert.match(result.leftHtml, /adoc-diff-block-changed/)
+    assert.match(result.rightHtml, /adoc-diff-block-changed/)
+    assert.equal(result.stats.changes, 1)
+  })
+
+  test('adds the block icon only when no word marker shows the change', () => {
+    const words = diff(
+      '<p class="data-line-1">Hello world</p>',
+      '<p class="data-line-1">Hello AsciiDoc</p>',
+    )
+    assert.doesNotMatch(words.leftHtml, /data-adoc-diff-icon/)
+    assert.doesNotMatch(words.rightHtml, /data-adoc-diff-icon/)
+
+    const formula = diff(
+      '<div class="stemblock data-line-1"><div class="content">\\(a^2\\)</div></div>',
+      '<div class="stemblock data-line-1"><div class="content">\\(a^3\\)</div></div>',
+    )
+    assert.match(formula.leftHtml, /data-adoc-diff-icon/)
+    assert.match(formula.rightHtml, /data-adoc-diff-icon/)
+  })
+
+  test('still highlights prose next to an unchanged formula', () => {
+    const paragraph = (value: string) =>
+      `<p class="data-line-1">See \\(a^2\\) for the ${value} value</p>`
+    const result = diff(paragraph('old'), paragraph('new'))
+    assert.match(result.leftHtml, /adoc-diff-word adoc-diff-word-del/)
+    assert.match(result.rightHtml, /adoc-diff-word adoc-diff-word-ins/)
+    // The formula itself stays untouched in a single text node.
+    const formulaHtml = /\\\([\s\S]*?\\\)/.exec(result.leftHtml)?.[0] ?? ''
+    assert.match(formulaHtml, /a\^2/)
+    assert.doesNotMatch(formulaHtml, /<span/)
   })
 })

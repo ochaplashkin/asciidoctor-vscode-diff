@@ -22,7 +22,7 @@
   "asciidoc.diff.codeBlocks.line": "コードを行単位で比較し、`+`/`−`/`~` のガターを表示します",
   "asciidoc.diff.codeBlocks.block": "コードブロックをまとめて比較します",
   "asciidoc.diff.collapseLines.desc": "この行数より長い削除ブロックは `−N` ストリップに折りたたまれます。短いブロックは表示されたままです。",
-  "asciidoc.diff.showStats.desc": "比較ヘッダーに `+追加 −削除 ~変更` の概要と色の凡例を表示します。",
+  "asciidoc.diff.showStats.desc": "比較ヘッダーに色の凡例を表示します。変更ナビゲーターは常に利用でき、詳細な `+追加 −削除 ~変更` の数値はそのツールチップに表示されます。",
   "asciidoc.editor.enableDrop.desc": "ドラッグアンドドロップによる画像挿入を有効にします。シフトキーを押しながら、テキストエディターにドラッグアンドドロップしてください。",
   "asciidoc.editor.drop.copyIntoWorkspace.desc": "`imagesdir`（または現在の Antora モジュール）から参照できない画像をドロップしたときに、プロジェクトへコピーするかどうかを制御します。",
   "asciidoc.editor.drop.copyIntoWorkspace.smart": "現在の場所から適切にリンクできない場合に、画像をプロジェクトへコピーするよう提案します。",
