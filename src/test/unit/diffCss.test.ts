@@ -138,4 +138,46 @@ describe('diff stylesheets', () => {
       /\.adoc-diff-block-ins\s*\{[^}]*background-image:\s*repeating-linear-gradient/s,
     )
   })
+
+  test('row highlights outrank the preview zebra striping and cell fills', () => {
+    // The preview stylesheets shade even rows and header/footer cells
+    // themselves; a bare `tr.adoc-diff-row-*` background loses to them.
+    const compact = contentCss.replace(/\s+/g, ' ')
+    assert.match(
+      compact,
+      /table\.tableblock > :is\(thead, tbody, tfoot\) > tr\.adoc-diff-row-ins > :is\(td, th\) \{ background: var\(\s*--vscode-diffEditor-insertedLineBackground/,
+    )
+    assert.match(
+      compact,
+      /table\.tableblock > :is\(thead, tbody, tfoot\) > tr\.adoc-diff-row-del > :is\(td, th\) \{ background: var\(\s*--vscode-diffEditor-removedLineBackground/,
+    )
+    assert.match(
+      compact,
+      /table\.tableblock > :is\(thead, tbody, tfoot\) > tr\.adoc-diff-row-gap > :is\(td, th\) \{ background: var\(--adoc-diff-gap-tint/,
+    )
+  })
+
+  test('a structurally changed table has no red or green frame', () => {
+    assert.doesNotMatch(contentCss, /table\.adoc-diff-table-(?:del|ins)/)
+  })
+
+  test('column gaps and added/removed cells outrank header/footer fills', () => {
+    const compact = contentCss.replace(/\s+/g, ' ')
+    assert.match(
+      compact,
+      /table\.tableblock > :is\(thead, tbody, tfoot\) > tr > :is\(td, th\)\.adoc-diff-col-gap[,{]/,
+    )
+    assert.match(
+      compact,
+      /table\.tableblock > :is\(thead, tbody, tfoot\) > tr > :is\(td, th\)\.adoc-diff-cell-ins \{ background: var\(\s*--vscode-diffEditor-insertedLineBackground/,
+    )
+    assert.match(
+      compact,
+      /table\.tableblock > :is\(thead, tbody, tfoot\) > tr > :is\(td, th\)\.adoc-diff-cell-del \{ background: var\(\s*--vscode-diffEditor-removedLineBackground/,
+    )
+    assert.match(
+      compact,
+      /table\.tableblock > :is\(thead, tbody, tfoot\) > tr > :is\(td, th\)\.adoc-diff-cell-changed \{ background: rgba\(128, 128, 128, 0.08\)/,
+    )
+  })
 })

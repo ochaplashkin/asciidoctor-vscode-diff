@@ -105,13 +105,13 @@ describe('renderDiff', () => {
     assert.equal(result.stats.changedCells, 1)
   })
 
-  test('outlines a table only for structural changes', () => {
+  test('does not outline a table for structural changes', () => {
     const result = diff(
       '<table class="tableblock"><tbody><tr><td class="tableblock">A</td></tr></tbody></table>',
       '<table class="tableblock"><tbody><tr><td class="tableblock">A</td></tr><tr><td class="tableblock">B</td></tr></tbody></table>',
     )
-    assert.match(result.leftHtml, /adoc-diff-table-del/)
-    assert.match(result.rightHtml, /adoc-diff-table-ins/)
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-table-del/)
+    assert.doesNotMatch(result.rightHtml, /adoc-diff-table-ins/)
     assert.match(result.rightHtml, /adoc-diff-row-ins/)
     assert.equal(result.stats.changedTables, 1)
   })
@@ -314,8 +314,8 @@ describe('renderDiff', () => {
     assert.match(result.rightHtml, /data-adoc-diff-grid="g0"/)
     assert.match(result.leftHtml, /adoc-diff-col-gap/)
     assert.match(result.rightHtml, /adoc-diff-cell-ins/)
-    assert.match(result.leftHtml, /adoc-diff-table-del/)
-    assert.match(result.rightHtml, /adoc-diff-table-ins/)
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-table-del/)
+    assert.doesNotMatch(result.rightHtml, /adoc-diff-table-ins/)
     assert.equal((result.leftHtml.match(/<col /g) ?? []).length, 4)
     assert.equal((result.rightHtml.match(/<col /g) ?? []).length, 4)
   })
@@ -329,7 +329,7 @@ describe('renderDiff', () => {
     )
     assert.match(result.leftHtml, /adoc-diff-row-gap/)
     assert.match(result.leftHtml, /colspan="2"/)
-    assert.match(result.leftHtml, /adoc-diff-table-del/)
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-table-del/)
     assert.match(result.rightHtml, /adoc-diff-row-ins/)
     assert.equal((result.leftHtml.match(/<tr/g) ?? []).length, 2)
     assert.equal((result.rightHtml.match(/<tr/g) ?? []).length, 2)
@@ -491,8 +491,8 @@ describe('renderDiff', () => {
     assert.match(result.leftHtml, /adoc-diff-col-gap/)
     assert.equal((result.leftHtml.match(/<col /g) ?? []).length, 4)
     assert.equal((result.rightHtml.match(/<col /g) ?? []).length, 4)
-    assert.match(result.leftHtml, /adoc-diff-table-del/)
-    assert.match(result.rightHtml, /adoc-diff-table-ins/)
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-table-del/)
+    assert.doesNotMatch(result.rightHtml, /adoc-diff-table-ins/)
   })
 
   test('keeps a colspan when a column is inserted inside it', () => {

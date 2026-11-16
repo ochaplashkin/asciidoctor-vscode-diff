@@ -129,6 +129,11 @@ interface Alignment {
 }
 
 const SIMILARITY_THRESHOLD = 0.25
+// A long block needs a stronger word-set overlap before it is paired and
+// word-diffed. Two unrelated paragraphs often share many stopwords ("the",
+// "and", "it"); the short-block threshold would pair them and turn a wholesale
+// replacement into a noisy word diff.
+const LONG_SIMILARITY_THRESHOLD = 0.5
 
 /**
  * A short replacement (a table cell, a term, a heading, a one-line paragraph)
@@ -393,6 +398,57 @@ function isInsideCell(el: Element): boolean {
     node = node.parentNode as ChildNode | null
   }
   return false
+}
+
+// Attributes that identify a block for alignment, not a change in it.
+const NON_MARKER_ATTRIBUTES = new Set([
+  'data-adoc-diff-anchor',
+  'data-adoc-diff-grid',
+  'data-adoc-diff-key',
+  'data-adoc-diff-link-key',
+])
+
+/** Whether the element itself carries a diff marker. */
+function hasChangeMarker(el: Element): boolean {
+  if (getClasses(el).some((name) => name.startsWith('adoc-diff-'))) {
+    return true
+  }
+  return el.attrs.some(
+    (attribute) =>
+      attribute.name.startsWith('data-adoc-diff-') &&
+      !NON_MARKER_ATTRIBUTES.has(attribute.name),
+  )
+}
+
+/**
+ * Whether every change marker in the two cells is covered by a hunk inside the
+ * cell. A nested table owns a hunk for its column/row changes; a nested list
+ * owns one for an added, removed or moved item; a code block owns one for a
+ * changed line. Marking the outer cell as well would add a duplicate hunk and
+ * count the cell a second time.
+ *
+ * A marker outside such an inner hunk means there is a change the cell must
+ * represent itself (for example, changed text next to the nested table or
+ * list), so the caller keeps the cell-level hunk.
+ */
+function isChangeCoveredByInnerHunks(left: Element, right: Element): boolean {
+  let hasHunk = false
+  const scan = (el: Element, covered: boolean): boolean => {
+    const insideHunk =
+      covered || getAttribute(el, 'data-adoc-diff-hunk') !== undefined
+    if (insideHunk) {
+      hasHunk = true
+    } else if (hasChangeMarker(el)) {
+      return false
+    }
+    for (const child of el.childNodes) {
+      if (isElement(child) && !scan(child, insideHunk)) {
+        return false
+      }
+    }
+    return true
+  }
+  return scan(left, false) && scan(right, false) && hasHunk
 }
 
 function attributeOf(el: Element, name: string): string {
@@ -862,7 +918,10 @@ function pairReplacements(pairs: Alignment[]): Alignment[] {
  * pair is diffed inside, so only the smallest changed unit is marked.
  *
  * Similarity remains as a fallback for the leftovers when the counts or tags in
- * the run do not line up positionally.
+ * the run do not line up positionally. It must not be limited to short blocks:
+ * a long paragraph with one changed word is still the same block roles and
+ * shares most of its words, so pairing it lets the word diff stay local instead
+ * of painting the whole paragraph as removed and added.
  */
 /**
  * Whether two blocks play the same structural role: same tag, and at least one
@@ -922,17 +981,17 @@ function pairReplacementRun(removed: Element[], added: Element[]): Alignment[] {
   }> = []
   for (let leftIndex = 0; leftIndex < removed.length; leftIndex++) {
     for (let rightIndex = 0; rightIndex < added.length; rightIndex++) {
-      if (
-        !sameBlockRole(removed[leftIndex], added[rightIndex]) ||
-        !canPairPositionally(removed[leftIndex], added[rightIndex])
-      ) {
+      if (!sameBlockRole(removed[leftIndex], added[rightIndex])) {
         continue
       }
-      const score = textSimilarity(
-        elementText(removed[leftIndex]),
-        elementText(added[rightIndex]),
-      )
-      if (score >= SIMILARITY_THRESHOLD) {
+      const leftText = elementText(removed[leftIndex])
+      const rightText = elementText(added[rightIndex])
+      const score = textSimilarity(leftText, rightText)
+      const long =
+        leftText.length > SHORT_TEXT_LIMIT ||
+        rightText.length > SHORT_TEXT_LIMIT
+      const threshold = long ? LONG_SIMILARITY_THRESHOLD : SIMILARITY_THRESHOLD
+      if (score >= threshold) {
         candidates.push({ leftIndex, rightIndex, score })
       }
     }
@@ -2627,7 +2686,30 @@ function ensureTableSection(
     return existing
   }
   const section = createElement(tag)
-  appendChild(table, section)
+  // Keep the HTML table model valid: a `thead` goes after the caption and
+  // column group but before the body, and a `tbody` goes before the footer.
+  // Appending either at the end would put a header after the body (or a body
+  // after the footer), which the browser may reorder or render incorrectly.
+  let insertAt = table.childNodes.length
+  if (tag === 'thead') {
+    const bodyIndex = table.childNodes.findIndex(
+      (child) =>
+        isElement(child) &&
+        (child.tagName === 'tbody' || child.tagName === 'tfoot'),
+    )
+    if (bodyIndex !== -1) {
+      insertAt = bodyIndex
+    }
+  } else if (tag === 'tbody') {
+    const footIndex = table.childNodes.findIndex(
+      (child) => isElement(child) && child.tagName === 'tfoot',
+    )
+    if (footIndex !== -1) {
+      insertAt = footIndex
+    }
+  }
+  section.parentNode = table
+  table.childNodes.splice(insertAt, 0, section)
   return section
 }
 
@@ -2661,9 +2743,18 @@ function insertRowPlaceholder(
       sourceSection.tagName === 'tfoot')
       ? sourceSection.tagName
       : 'tbody'
+  // Reuse the next row's section only when it is the same kind of section as
+  // the source row. A body row can be followed by a `tfoot` row (a table with
+  // a footer, or an inserted row just before one); putting the body
+  // placeholder into that `tfoot` would place it in the footer and pick up the
+  // footer styling instead of ending the body. Append it to the body instead.
+  const nextSection = nextTargetRow?.parentNode as ChildNode | null | undefined
   const section =
-    nextTargetRow && sectionTag === 'tbody'
-      ? (nextTargetRow.parentNode as Element)
+    nextSection !== null &&
+    nextSection !== undefined &&
+    isElement(nextSection) &&
+    nextSection.tagName === sectionTag
+      ? nextSection
       : ensureTableSection(targetTable, sectionTag)
   const row = createElement('tr', [
     {
@@ -2756,8 +2847,8 @@ function diffTable(left: Element, right: Element, ctx: DiffContext): boolean {
     leftWidths,
   )
   const columnStructural = leftStructural || rightStructural
-  let structural = columnStructural
   let tableChanged = false
+  let innerHunkChanged = false
   let tableHunk: string | undefined
   const ensureTableHunk = (): void => {
     tableChanged = true
@@ -2772,6 +2863,15 @@ function diffTable(left: Element, right: Element, ctx: DiffContext): boolean {
   if (layoutChanged) {
     markChanged(left)
     markChanged(right)
+    ensureTableHunk()
+  }
+  // A column can be replaced or shifted without changing the number or widths
+  // of the columns (for example, removing `Count` and appending `Reviewer`).
+  // The table owns that structural change as one hunk; without this the row
+  // loop suppresses per-row hunks because of `columnStructural`, and the table
+  // falls through to the non-visual comparison, which mistakes the column gap
+  // and cell markers for formatting changes.
+  if (columnStructural) {
     ensureTableHunk()
   }
 
@@ -2806,8 +2906,8 @@ function diffTable(left: Element, right: Element, ctx: DiffContext): boolean {
         columnPairs.length,
         ctx,
       )
-      if (row.structural) {
-        structural = true
+      if (row.innerHunk) {
+        innerHunkChanged = true
       }
       // One changed row is one hunk: a changed cell does not add a second one.
       // When the change is a column insertion, the table itself owns the hunk.
@@ -2820,7 +2920,6 @@ function diffTable(left: Element, right: Element, ctx: DiffContext): boolean {
     } else if (pair.left) {
       addClass(pair.left, 'adoc-diff-row-del')
       ctx.stats.removedBlocks++
-      structural = true
       const placeholder = insertRowPlaceholder(
         right,
         nextRowOnSide(pairs, i, 'right'),
@@ -2833,7 +2932,6 @@ function diffTable(left: Element, right: Element, ctx: DiffContext): boolean {
     } else if (pair.right) {
       addClass(pair.right, 'adoc-diff-row-ins')
       ctx.stats.addedBlocks++
-      structural = true
       const placeholder = insertRowPlaceholder(
         left,
         nextRowOnSide(pairs, i, 'left'),
@@ -2846,20 +2944,18 @@ function diffTable(left: Element, right: Element, ctx: DiffContext): boolean {
     }
   }
 
-  if (structural) {
-    addClass(left, 'adoc-diff-table-del')
-    addClass(right, 'adoc-diff-table-ins')
-  }
   if (tableChanged) {
     ctx.stats.changedTables++
   }
-  return tableChanged
+  return tableChanged || innerHunkChanged
 }
 
 interface RowDiff {
   changed: boolean
   structural: boolean
   nonVisual: boolean
+  /** The row changed only inside a block that already owns its own hunk. */
+  innerHunk: boolean
 }
 
 function sameCellAcrossRows(
@@ -2885,6 +2981,7 @@ function diffRowGrid(
   let changed = false
   let structural = false
   let nonVisual = false
+  let innerHunk = false
   const seenLeft = new Set<Element>()
   const seenRight = new Set<Element>()
   for (let column = 0; column < columnCount; column++) {
@@ -2930,15 +3027,22 @@ function diffRowGrid(
       ctx.cellDepth--
     }
     if (cellChanged) {
-      markCellChanged(leftCell.element)
-      markCellChanged(rightCell.element)
-      ctx.stats.changedCells++
-      changed = true
+      // A cell that only contains a nested table: the nested table already
+      // marked and counted its changed rows/cells. Marking the outer cell too
+      // would add a duplicate hunk and count the outer table a second time.
+      if (isChangeCoveredByInnerHunks(leftCell.element, rightCell.element)) {
+        innerHunk = true
+      } else {
+        markCellChanged(leftCell.element)
+        markCellChanged(rightCell.element)
+        ctx.stats.changedCells++
+        changed = true
+      }
     } else if (diffNonVisual(leftCell.element, rightCell.element, ctx)) {
       nonVisual = true
     }
   }
-  return { changed, structural, nonVisual }
+  return { changed, structural, nonVisual, innerHunk }
 }
 
 function diffTablePlain(
@@ -2947,10 +3051,8 @@ function diffTablePlain(
   ctx: DiffContext,
 ): boolean {
   recordLinePair(left, right, ctx)
-  const leftModel = buildTableModel(left)
-  const rightModel = buildTableModel(right)
-  let structural = leftModel.columns !== rightModel.columns
   let tableChanged = false
+  let innerHunkChanged = false
   let tableHunk: string | undefined
   const ensureTableHunk = (): void => {
     tableChanged = true
@@ -2988,32 +3090,26 @@ function diffTablePlain(
       } else if (row.nonVisual) {
         tableChanged = true
       }
-      if (row.structural) {
-        structural = true
+      if (row.innerHunk) {
+        innerHunkChanged = true
       }
     } else if (pair.left) {
       addClass(pair.left, 'adoc-diff-row-del')
       ctx.stats.removedBlocks++
-      structural = true
       markHunk(ctx, 'visual', pair.left)
       tableChanged = true
     } else if (pair.right) {
       addClass(pair.right, 'adoc-diff-row-ins')
       ctx.stats.addedBlocks++
-      structural = true
       markHunk(ctx, 'visual', undefined, pair.right)
       tableChanged = true
     }
   }
 
-  if (structural) {
-    addClass(left, 'adoc-diff-table-del')
-    addClass(right, 'adoc-diff-table-ins')
-  }
   if (tableChanged) {
     ctx.stats.changedTables++
   }
-  return tableChanged
+  return tableChanged || innerHunkChanged
 }
 
 function diffRowPlain(
@@ -3026,6 +3122,7 @@ function diffRowPlain(
   let changed = leftCells.length !== rightCells.length
   let structural = leftCells.length !== rightCells.length
   let nonVisual = false
+  let innerHunk = false
   const count = Math.max(leftCells.length, rightCells.length)
   for (let index = 0; index < count; index++) {
     const leftCell = leftCells[index]
@@ -3039,10 +3136,14 @@ function diffRowPlain(
         ctx.cellDepth--
       }
       if (cellChanged) {
-        markCellChanged(leftCell)
-        markCellChanged(rightCell)
-        ctx.stats.changedCells++
-        changed = true
+        if (isChangeCoveredByInnerHunks(leftCell, rightCell)) {
+          innerHunk = true
+        } else {
+          markCellChanged(leftCell)
+          markCellChanged(rightCell)
+          ctx.stats.changedCells++
+          changed = true
+        }
       } else if (diffNonVisual(leftCell, rightCell, ctx)) {
         nonVisual = true
       }
@@ -3058,7 +3159,7 @@ function diffRowPlain(
       structural = true
     }
   }
-  return { changed, structural, nonVisual }
+  return { changed, structural, nonVisual, innerHunk }
 }
 
 function diffCaption(left: Element, right: Element, ctx: DiffContext): boolean {

@@ -34,10 +34,20 @@
 
 /* Structural table placeholders: an empty column or row on the side that does
  * not have it. The tint comes from the `adoc-diff-gap-ins/del` class, so the
- * same neutral semantics as block gaps applies. */
+ * same neutral semantics as block gaps applies. The preview stylesheets shade
+ * `thead`/`tfoot` cells themselves, so the placeholder needs the same
+ * higher-specificity cell selector as the row highlight below. */
 .adoc-diff-col-gap,
 tr.adoc-diff-row-gap > td,
-tr.adoc-diff-row-gap > th {
+tr.adoc-diff-row-gap > th,
+table.tableblock
+  > :is(thead, tbody, tfoot)
+  > tr
+  > :is(td, th).adoc-diff-col-gap,
+table.tableblock
+  > :is(thead, tbody, tfoot)
+  > tr.adoc-diff-row-gap
+  > :is(td, th) {
   background: var(--adoc-diff-gap-tint, transparent);
 }
 
@@ -192,7 +202,11 @@ pre.adoc-diff-code > code {
 
 /* Modified, but neither purely added nor removed: the cell keeps a light
  * neutral tint, while the changed words keep their neutral marks. */
-.adoc-diff-cell-changed {
+.adoc-diff-cell-changed,
+table.tableblock
+  > :is(thead, tbody, tfoot)
+  > tr
+  > :is(td, th).adoc-diff-cell-changed {
   background: rgba(128, 128, 128, 0.08);
 }
 
@@ -330,18 +344,15 @@ tr.adoc-diff-hunk-target > th {
   outline-offset: -1px;
 }
 
-table.adoc-diff-table-del {
-  outline: 1px solid
-    var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.35));
-  outline-offset: -1px;
-}
-
-table.adoc-diff-table-ins {
-  outline: 1px solid
-    var(--vscode-diffEditor-insertedTextBackground, rgba(0, 128, 0, 0.35));
-  outline-offset: -1px;
-}
-
+/* The preview stylesheets shade table rows themselves (the editor style
+ * zebra-stripes every even body row, GitHub shades every even row, and the
+ * header/footer cells carry their own fill). A bare `tr.adoc-diff-row-*`
+ * selector loses to those rules, so an inserted or removed row that landed on
+ * a striped position kept the stripe instead of the green/red highlight. Paint
+ * the row and its cells with selectors that outrank the preview tables; the
+ * diff stylesheet is appended after the preview styles, so an equal
+ * specificity also resolves in its favor. */
+table.tableblock > :is(thead, tbody, tfoot) > tr.adoc-diff-row-del,
 tr.adoc-diff-row-del {
   background: var(
     --vscode-diffEditor-removedLineBackground,
@@ -349,6 +360,17 @@ tr.adoc-diff-row-del {
   );
 }
 
+table.tableblock
+  > :is(thead, tbody, tfoot)
+  > tr.adoc-diff-row-del
+  > :is(td, th) {
+  background: var(
+    --vscode-diffEditor-removedLineBackground,
+    rgba(255, 0, 0, 0.1)
+  );
+}
+
+table.tableblock > :is(thead, tbody, tfoot) > tr.adoc-diff-row-ins,
 tr.adoc-diff-row-ins {
   background: var(
     --vscode-diffEditor-insertedLineBackground,
@@ -356,8 +378,22 @@ tr.adoc-diff-row-ins {
   );
 }
 
+table.tableblock
+  > :is(thead, tbody, tfoot)
+  > tr.adoc-diff-row-ins
+  > :is(td, th) {
+  background: var(
+    --vscode-diffEditor-insertedLineBackground,
+    rgba(0, 128, 0, 0.1)
+  );
+}
+
 td.adoc-diff-cell-del,
-th.adoc-diff-cell-del {
+th.adoc-diff-cell-del,
+table.tableblock
+  > :is(thead, tbody, tfoot)
+  > tr
+  > :is(td, th).adoc-diff-cell-del {
   background: var(
     --vscode-diffEditor-removedLineBackground,
     rgba(255, 0, 0, 0.12)
@@ -370,7 +406,11 @@ th.adoc-diff-cell-del {
 }
 
 td.adoc-diff-cell-ins,
-th.adoc-diff-cell-ins {
+th.adoc-diff-cell-ins,
+table.tableblock
+  > :is(thead, tbody, tfoot)
+  > tr
+  > :is(td, th).adoc-diff-cell-ins {
   background: var(
     --vscode-diffEditor-insertedLineBackground,
     rgba(0, 128, 0, 0.12)

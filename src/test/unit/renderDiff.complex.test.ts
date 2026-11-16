@@ -48,6 +48,25 @@ function count(html: string, pattern: RegExp): number {
   return (html.match(pattern) ?? []).length
 }
 
+/** Count non-gap code lines of a kind (add/del/changed). */
+function codeLineCount(html: string, kind: string): number {
+  return count(
+    html,
+    new RegExp(`class="adoc-diff-code-line adoc-diff-code-line-${kind}"`, 'g'),
+  )
+}
+
+/** Count code gap lines that reserve space for an added/removed line. */
+function codeGapCount(html: string, kind: string): number {
+  return count(
+    html,
+    new RegExp(
+      `class="adoc-diff-code-line adoc-diff-code-line-gap adoc-diff-code-line-${kind}"`,
+      'g',
+    ),
+  )
+}
+
 function paragraph(line: number, text: string): string {
   return `<div class="paragraph data-line-${line}"><p class="data-line-${line}">${text}</p></div>`
 }
@@ -57,6 +76,7 @@ function table(
     widths?: string[]
     header?: string[]
     rows?: string[][]
+    footer?: string[]
     line?: number
   } = {},
 ): string {
@@ -70,14 +90,20 @@ function table(
   ]
   const line = options.line ?? 40
   const cols = widths.map((width) => `<col width="${width}">`).join('')
-  const head = header.map((cell) => `<th>${cell}</th>`).join('')
+  const head =
+    header.length === 0
+      ? ''
+      : `<thead class="data-line-${line + 1}"><tr>${header.map((cell) => `<th>${cell}</th>`).join('')}</tr></thead>`
   const body = rows
     .map(
       (row, index) =>
         `<tr class="data-line-${line + index + 2}">${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`,
     )
     .join('')
-  return `<table class="tableblock data-line-${line}"><colgroup>${cols}</colgroup><thead class="data-line-${line + 1}"><tr>${head}</tr></thead><tbody>${body}</tbody></table>`
+  const footer = options.footer
+    ? `<tfoot><tr class="data-line-${line + rows.length + 2}">${options.footer.map((cell) => `<td>${cell}</td>`).join('')}</tr></tfoot>`
+    : ''
+  return `<table class="tableblock data-line-${line}"><colgroup>${cols}</colgroup>${head}<tbody>${body}</tbody>${footer}</table>`
 }
 
 function code(lines: readonly string[], line = 20): string {
@@ -151,6 +177,68 @@ function baselineDocument(): string {
       69,
     ),
   ].join('')
+}
+
+function jsonCode(value: string): string {
+  return code(value.split('\n'))
+}
+
+function listItem(text: string, children = ''): string {
+  return `<li><p>${text}</p>${children}</li>`
+}
+
+function ulist(items: string): string {
+  return `<div class="ulist"><ul>${items}</ul></div>`
+}
+
+function listDocument(items: string): string {
+  return section('data', 'Lists', ulist(items), 1)
+}
+
+/** A two-column table whose content cell holds a list. */
+function listInCellDocument(listHtml: string): string {
+  return section(
+    'data',
+    'Data',
+    table({
+      line: 4,
+      widths: ['33%', '66%'],
+      header: ['Kind', 'Items'],
+      rows: [['note', `<div class="content">${listHtml}</div>`]],
+    }),
+    1,
+  )
+}
+
+/**
+ * A document whose content is one section with a table. The row fixtures below
+ * change this table, so the alignment of the surrounding section is exercised
+ * too.
+ */
+function tableDocument(rows: string[][]): string {
+  return section('data', 'Data', table({ line: 4, rows }), 1)
+}
+
+/** The outer table emitted for a nested table; `text` sits next to it. */
+function nestedTableWithInner(inner: string, text = ''): string {
+  const paragraph = text === '' ? '' : `<p class="tableblock">${text}</p>`
+  return `<table class="tableblock data-line-4"><colgroup><col width="33%"><col width="66%"></colgroup><thead><tr><th>Kind</th><th>Content</th></tr></thead><tbody><tr class="data-line-6"><td>note</td><td><div class="content">${paragraph}${inner}</div></td></tr></tbody></table>`
+}
+
+function nestedTable(rows: string[][], text = ''): string {
+  return nestedTableWithInner(
+    table({
+      line: 8,
+      header: ['Name', 'Value'],
+      widths: ['50%', '50%'],
+      rows,
+    }),
+    text,
+  )
+}
+
+function nestedTableDocument(rows: string[][], text = ''): string {
+  return section('data', 'Data', nestedTable(rows, text), 1)
 }
 
 describe('renderDiff with complex documents', () => {
@@ -251,6 +339,805 @@ describe('renderDiff with complex documents', () => {
     assert.match(
       result.rightHtml,
       /<tr[^>]*adoc-diff-row-ins[^>]*data-adoc-diff-hunk/,
+    )
+  })
+
+  test('appends a row at the end: a last-row placeholder and one inserted row', () => {
+    const rightRows = [...TABLE_ROWS, ['epsilon', '5', 'new', 'eve']]
+    const result = diff(tableDocument(TABLE_ROWS), tableDocument(rightRows))
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.removedBlocks, 0)
+    assert.equal(result.stats.changedCells, 0)
+    assert.equal(result.stats.changedTables, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.deepEqual(hunkIds(result.leftHtml), hunkIds(result.rightHtml))
+    // The old side reserves the space at the end of its tbody.
+    assert.match(
+      result.leftHtml,
+      /<\/tr>\s*<tr[^>]*adoc-diff-row-gap[^>]*data-adoc-diff-row-gap="ins"[^>]*><td[^>]*colspan="4"/,
+    )
+    assert.match(
+      result.rightHtml,
+      /<tr[^>]*adoc-diff-row-ins[^>]*>[\s\S]*epsilon/,
+    )
+  })
+
+  test('prepends a row: the placeholder is the first body row', () => {
+    const rightRows = [['zero', '0', 'new', 'zoe'], ...TABLE_ROWS]
+    const result = diff(tableDocument(TABLE_ROWS), tableDocument(rightRows))
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.removedBlocks, 0)
+    assert.match(
+      result.leftHtml,
+      /<tbody><tr[^>]*adoc-diff-row-gap[^>]*data-adoc-diff-row-gap="ins"/,
+    )
+    assert.match(
+      result.rightHtml,
+      /<tbody><tr[^>]*adoc-diff-row-ins[^>]*>[\s\S]*zero/,
+    )
+  })
+
+  test('inserts a row before a footer: the placeholder stays in the tbody', () => {
+    const footer = ['delta', '4', 'ready', 'dina']
+    const left = section(
+      'data',
+      'Data',
+      table({ line: 4, rows: [TABLE_ROWS[0], TABLE_ROWS[1]], footer }),
+      1,
+    )
+    const right = section(
+      'data',
+      'Data',
+      table({
+        line: 4,
+        rows: [TABLE_ROWS[0], TABLE_ROWS[1], ['inserted', '9', 'new', 'ian']],
+        footer,
+      }),
+      1,
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.removedBlocks, 0)
+    const leftBody = /<tbody>([\s\S]*?)<\/tbody>/.exec(result.leftHtml)?.[1]
+    const leftFoot = /<tfoot>([\s\S]*?)<\/tfoot>/.exec(result.leftHtml)?.[1]
+    assert.match(
+      leftBody ?? '',
+      /adoc-diff-row-gap[^>]*data-adoc-diff-row-gap="ins"/,
+    )
+    assert.doesNotMatch(leftFoot ?? '', /adoc-diff-row-gap/)
+    const rightBody = /<tbody>([\s\S]*?)<\/tbody>/.exec(result.rightHtml)?.[1]
+    assert.match(rightBody ?? '', /adoc-diff-row-ins[^>]*>[\s\S]*inserted/)
+  })
+
+  test('adds a header row: the placeholder is a thead before the body', () => {
+    const rows = [TABLE_ROWS[0], TABLE_ROWS[1]]
+    const left = section(
+      'data',
+      'Data',
+      table({ line: 4, header: [], rows }),
+      1,
+    )
+    const right = section('data', 'Data', table({ line: 4, rows }), 1)
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.match(
+      result.leftHtml,
+      /<thead[^>]*><tr[^>]*adoc-diff-row-gap[^>]*data-adoc-diff-row-gap="ins"[^>]*><th/,
+    )
+    assert.doesNotMatch(result.leftHtml, /<\/tbody><thead/)
+    assert.match(
+      result.rightHtml,
+      /<thead[^>]*><tr[^>]*adoc-diff-row-ins[^>]*>[\s\S]*Name/,
+    )
+  })
+
+  test('removes a header row: the placeholder thead is still before the body', () => {
+    const rows = [TABLE_ROWS[0], TABLE_ROWS[1]]
+    const left = section('data', 'Data', table({ line: 4, rows }), 1)
+    const right = section(
+      'data',
+      'Data',
+      table({ line: 4, header: [], rows }),
+      1,
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.removedBlocks, 1)
+    assert.match(
+      result.leftHtml,
+      /<thead[^>]*><tr[^>]*adoc-diff-row-del[^>]*>[\s\S]*Name/,
+    )
+    assert.match(
+      result.rightHtml,
+      /<thead[^>]*><tr[^>]*adoc-diff-row-gap[^>]*data-adoc-diff-row-gap="del"[^>]*><th/,
+    )
+    assert.doesNotMatch(result.rightHtml, /<\/tbody><thead/)
+  })
+
+  test('adds a row inside a nested table without a second outer hunk', () => {
+    const rows = [
+      ['alpha', '1'],
+      ['beta', '2'],
+    ]
+    const result = diff(
+      nestedTableDocument(rows),
+      nestedTableDocument([...rows, ['gamma', '3']]),
+    )
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.visualChanges, 1)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.removedBlocks, 0)
+    assert.equal(result.stats.changedCells, 0)
+    assert.equal(result.stats.changedTables, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.equal(hunkIds(result.rightHtml).length, 1)
+    // The outer cell/table is not a second change region.
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-cell-changed/)
+    assert.doesNotMatch(result.leftHtml, /<table[^>]*data-adoc-diff-hunk/)
+    const hunk = hunkIds(result.leftHtml)[0]
+    assert.match(
+      result.leftHtml,
+      new RegExp(
+        `<tr[^>]*adoc-diff-row-gap[^>]*data-adoc-diff-row-gap="ins"[^>]*data-adoc-diff-hunk="${hunk}"`,
+      ),
+    )
+    assert.match(result.rightHtml, /adoc-diff-row-ins[^>]*>[\s\S]*gamma/)
+  })
+
+  test('removes and adds rows inside a nested table as two inner hunks', () => {
+    const oldRows = [
+      ['alpha', '1'],
+      ['beta', '2'],
+      ['gamma', '3'],
+      ['delta', '4'],
+    ]
+    const newRows = [
+      ['alpha', '1'],
+      ['gamma', '3'],
+      ['delta', '4'],
+      ['inserted', '9'],
+    ]
+    const result = diff(
+      nestedTableDocument(oldRows),
+      nestedTableDocument(newRows),
+    )
+    assert.equal(result.stats.changes, 2)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.removedBlocks, 1)
+    assert.equal(result.stats.changedCells, 0)
+    assert.equal(result.stats.changedTables, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 2)
+    assert.deepEqual(hunkIds(result.leftHtml), hunkIds(result.rightHtml))
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-cell-changed/)
+    assert.match(result.leftHtml, /<tr[^>]*adoc-diff-row-del[^>]*>[\s\S]*beta/)
+    assert.match(
+      result.rightHtml,
+      /<tr[^>]*adoc-diff-row-ins[^>]*>[\s\S]*inserted/,
+    )
+  })
+
+  test('does not add an outer hunk when only the nested table changes', () => {
+    const rows = [
+      ['alpha', '1'],
+      ['beta', '2'],
+    ]
+    const result = diff(
+      nestedTableDocument(rows, 'Static text.'),
+      nestedTableDocument([...rows, ['gamma', '3']], 'Static text.'),
+    )
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.changedCells, 0)
+    assert.equal(result.stats.changedTables, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-cell-changed/)
+    assert.match(result.rightHtml, /adoc-diff-row-ins[^>]*>[\s\S]*gamma/)
+  })
+
+  test('reports a text change and a nested row change separately', () => {
+    const rows = [
+      ['alpha', '1'],
+      ['beta', '2'],
+    ]
+    const result = diff(
+      nestedTableDocument(rows, 'Old text.'),
+      nestedTableDocument([...rows, ['gamma', '3']], 'New text.'),
+    )
+    assert.equal(result.stats.changes, 2)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.changedCells, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 2)
+    assert.match(result.leftHtml, /adoc-diff-cell-changed/)
+    assert.match(result.leftHtml, /adoc-diff-word adoc-diff-word-del/)
+    assert.match(
+      result.leftHtml,
+      /adoc-diff-row-gap[^>]*data-adoc-diff-row-gap="ins"/,
+    )
+  })
+
+  test('reports a same-count column replacement as one table hunk', () => {
+    const widths = ['33%', '33%', '34%']
+    const left = section(
+      'data',
+      'Data',
+      table({
+        line: 4,
+        widths,
+        header: ['Name', 'Count', 'Status'],
+        rows: [
+          ['alpha', '1', 'ready'],
+          ['beta', '2', 'draft'],
+        ],
+      }),
+      1,
+    )
+    const right = section(
+      'data',
+      'Data',
+      table({
+        line: 4,
+        widths,
+        header: ['Name', 'Status', 'Reviewer'],
+        rows: [
+          ['alpha', 'ready', 'ann'],
+          ['beta', 'draft', 'bob'],
+        ],
+      }),
+      1,
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.visualChanges, 1)
+    assert.equal(result.stats.nonVisualChanges, 0)
+    assert.equal(result.stats.changedTables, 1)
+    assert.equal(result.stats.changedCells, 0)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.deepEqual(hunkIds(result.leftHtml), hunkIds(result.rightHtml))
+    assert.match(result.leftHtml, /adoc-diff-col-gap/)
+    assert.match(result.leftHtml, /adoc-diff-cell-del/)
+    assert.match(result.rightHtml, /adoc-diff-cell-ins/)
+  })
+
+  test('reports several added and removed columns as one table hunk', () => {
+    const oldTable = table({
+      line: 4,
+      widths: ['33%', '33%', '34%'],
+      header: ['A', 'B', 'C'],
+      rows: [['a1', 'b1', 'c1']],
+    })
+    const newTable = table({
+      line: 4,
+      widths: ['20%', '20%', '20%', '20%', '20%'],
+      header: ['X', 'A', 'C', 'Y', 'Z'],
+      rows: [['x1', 'a1', 'c1', 'y1', 'z1']],
+    })
+    const result = diff(
+      section('data', 'Data', oldTable, 1),
+      section('data', 'Data', newTable, 1),
+    )
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.visualChanges, 1)
+    assert.equal(result.stats.changedTables, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.match(result.leftHtml, /adoc-diff-col-gap/)
+    assert.match(result.leftHtml, /adoc-diff-cell-del/)
+    assert.match(result.rightHtml, /adoc-diff-cell-ins/)
+  })
+
+  test('adds a column inside a nested table without a second outer hunk', () => {
+    const leftInner = table({
+      line: 8,
+      header: ['Name', 'Count'],
+      widths: ['50%', '50%'],
+      rows: [
+        ['alpha', '1'],
+        ['beta', '2'],
+      ],
+    })
+    const rightInner = table({
+      line: 8,
+      header: ['Name', 'Count', 'Status'],
+      widths: ['33%', '33%', '34%'],
+      rows: [
+        ['alpha', '1', 'ready'],
+        ['beta', '2', 'draft'],
+      ],
+    })
+    const result = diff(
+      section('data', 'Data', nestedTableWithInner(leftInner), 1),
+      section('data', 'Data', nestedTableWithInner(rightInner), 1),
+    )
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.visualChanges, 1)
+    assert.equal(result.stats.changedTables, 1)
+    assert.equal(result.stats.changedCells, 0)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.match(result.leftHtml, /adoc-diff-col-gap/)
+    assert.match(result.rightHtml, /adoc-diff-cell-ins/)
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-cell-changed/)
+  })
+
+  test('renders a row and a column added in the same change', () => {
+    const oldTable = table({
+      line: 4,
+      widths: ['50%', '50%'],
+      header: ['Name', 'Count'],
+      rows: [
+        ['alpha', '1'],
+        ['beta', '2'],
+      ],
+    })
+    const newTable = table({
+      line: 4,
+      widths: ['33%', '33%', '34%'],
+      header: ['Name', 'Count', 'Status'],
+      rows: [
+        ['alpha', '1', 'ready'],
+        ['beta', '2', 'draft'],
+        ['gamma', '3', 'new'],
+      ],
+    })
+    const result = diff(
+      section('data', 'Data', oldTable, 1),
+      section('data', 'Data', newTable, 1),
+    )
+    assert.equal(result.stats.changes, 2)
+    assert.equal(result.stats.visualChanges, 2)
+    assert.equal(result.stats.changedTables, 1)
+    assert.equal(result.stats.changedCells, 0)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 2)
+    assert.match(result.leftHtml, /adoc-diff-col-gap/)
+    assert.match(result.leftHtml, /adoc-diff-row-gap/)
+    assert.match(result.rightHtml, /adoc-diff-cell-ins/)
+    assert.match(result.rightHtml, /adoc-diff-row-ins/)
+  })
+
+  test('renders row and column removals and additions together', () => {
+    const oldTable = table({
+      line: 4,
+      widths: ['33%', '33%', '34%'],
+      header: ['Name', 'Count', 'Status'],
+      rows: [
+        ['alpha', '1', 'ready'],
+        ['beta', '2', 'draft'],
+        ['gamma', '3', 'ready'],
+        ['delta', '4', 'draft'],
+        ['epsilon', '5', 'ready'],
+      ],
+    })
+    const newTable = table({
+      line: 4,
+      widths: ['25%', '25%', '25%', '25%'],
+      header: ['Name', 'Severity', 'Count', 'Status'],
+      rows: [
+        ['alpha', 'high', '1', 'ready'],
+        ['gamma', 'low', '3', 'ready'],
+        ['epsilon', 'med', '5', 'ready'],
+        ['zero', 'low', '0', 'new'],
+      ],
+    })
+    const result = diff(
+      section('data', 'Data', oldTable, 1),
+      section('data', 'Data', newTable, 1),
+    )
+    assert.equal(result.stats.changes, 4)
+    assert.equal(result.stats.visualChanges, 4)
+    assert.equal(result.stats.changedTables, 1)
+    assert.equal(result.stats.changedCells, 0)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.removedBlocks, 2)
+    assert.equal(hunkIds(result.leftHtml).length, 4)
+    // Two removed rows are red; the appended row is green with a placeholder.
+    assert.equal(
+      count(result.leftHtml, /<tr[^>]*class="[^"]*\badoc-diff-row-del\b/g),
+      2,
+    )
+    assert.equal(
+      count(result.rightHtml, /class="adoc-diff-row-gap adoc-diff-gap-del"/g),
+      2,
+    )
+    assert.match(
+      result.leftHtml,
+      /adoc-diff-row-gap[^>]*data-adoc-diff-row-gap="ins"/,
+    )
+    assert.match(result.rightHtml, /adoc-diff-row-ins[^>]*>[\s\S]*zero/)
+    // The added column keeps its own table-level marker.
+    assert.match(result.leftHtml, /adoc-diff-col-gap/)
+    assert.match(result.rightHtml, /adoc-diff-cell-ins/)
+  })
+
+  test('keeps a mixed row and column change on the nested table', () => {
+    const oldInner = table({
+      line: 8,
+      widths: ['33%', '33%', '34%'],
+      header: ['Name', 'Count', 'Status'],
+      rows: [
+        ['alpha', '1', 'ready'],
+        ['beta', '2', 'draft'],
+        ['gamma', '3', 'ready'],
+        ['delta', '4', 'draft'],
+        ['epsilon', '5', 'ready'],
+      ],
+    })
+    const newInner = table({
+      line: 8,
+      widths: ['25%', '25%', '25%', '25%'],
+      header: ['Name', 'Severity', 'Count', 'Status'],
+      rows: [
+        ['alpha', 'high', '1', 'ready'],
+        ['gamma', 'low', '3', 'ready'],
+        ['epsilon', 'med', '5', 'ready'],
+        ['zero', 'low', '0', 'new'],
+      ],
+    })
+    const result = diff(
+      section('data', 'Data', nestedTableWithInner(oldInner), 1),
+      section('data', 'Data', nestedTableWithInner(newInner), 1),
+    )
+    assert.equal(result.stats.changes, 4)
+    assert.equal(result.stats.visualChanges, 4)
+    assert.equal(result.stats.changedTables, 1)
+    assert.equal(result.stats.changedCells, 0)
+    assert.equal(hunkIds(result.leftHtml).length, 4)
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-cell-changed/)
+    assert.match(result.leftHtml, /adoc-diff-col-gap/)
+    assert.match(result.leftHtml, /adoc-diff-row-gap/)
+    assert.match(result.rightHtml, /adoc-diff-cell-ins/)
+    assert.match(result.rightHtml, /adoc-diff-row-ins/)
+  })
+
+  test('adds a child to a nested list', () => {
+    const left = listDocument(
+      listItem('one', ulist(listItem('one.one'))) + listItem('two'),
+    )
+    const right = listDocument(
+      listItem('one', ulist(listItem('one.one') + listItem('one.two'))) +
+        listItem('two'),
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.removedBlocks, 0)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.match(
+      result.rightHtml,
+      /<li[^>]*adoc-diff-block-ins[^>]*>[\s\S]*one\.two/,
+    )
+  })
+
+  test('removes a child from a nested list', () => {
+    const left = listDocument(
+      listItem('one', ulist(listItem('one.one') + listItem('one.two'))) +
+        listItem('two'),
+    )
+    const right = listDocument(
+      listItem('one', ulist(listItem('one.one'))) + listItem('two'),
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.addedBlocks, 0)
+    assert.equal(result.stats.removedBlocks, 1)
+    assert.match(
+      result.leftHtml,
+      /<li[^>]*adoc-diff-block-del[^>]*>[\s\S]*one\.two/,
+    )
+  })
+
+  test('renders a dedented child at both hierarchy levels', () => {
+    const left = listDocument(
+      listItem('one', ulist(listItem('one.one'))) + listItem('two'),
+    )
+    const right = listDocument(
+      listItem('one') + listItem('one.one') + listItem('two'),
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 2)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.removedBlocks, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 2)
+    assert.match(result.leftHtml, /adoc-diff-block-del[^>]*>[\s\S]*one\.one/)
+    assert.match(result.rightHtml, /adoc-diff-block-ins[^>]*>[\s\S]*one\.one/)
+  })
+
+  test('reports a reordered nested list item as moved', () => {
+    const left = listDocument(
+      listItem('one', ulist(listItem('one.a') + listItem('one.b'))),
+    )
+    const right = listDocument(
+      listItem('one', ulist(listItem('one.b') + listItem('one.a'))),
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.movedBlocks, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.match(result.leftHtml, /adoc-diff-moved/)
+    assert.match(result.rightHtml, /adoc-diff-moved/)
+  })
+
+  test('adds a child to a list inside a table cell without an outer hunk', () => {
+    const left = listInCellDocument(
+      ulist(listItem('one', ulist(listItem('one.one')))),
+    )
+    const right = listInCellDocument(
+      ulist(listItem('one', ulist(listItem('one.one') + listItem('one.two')))),
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.changedCells, 0)
+    assert.equal(result.stats.changedTables, 0)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-cell-changed/)
+    assert.match(result.rightHtml, /adoc-diff-block-ins[^>]*>[\s\S]*one\.two/)
+  })
+
+  test('keeps a list item text change in a cell on the outer row hunk', () => {
+    const left = listInCellDocument(ulist(listItem('one.old')))
+    const right = listInCellDocument(ulist(listItem('one.new')))
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.changedCells, 1)
+    assert.equal(result.stats.changedTables, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.match(result.leftHtml, /adoc-diff-cell-changed/)
+    assert.match(result.leftHtml, /<tr[^>]*data-adoc-diff-hunk=/)
+  })
+
+  test('diffs a changed JSON key without replacing the whole line', () => {
+    const base = {
+      name: 'alpha',
+      version: 1,
+      enabled: true,
+      tags: ['one', 'two'],
+    }
+    const pretty = JSON.stringify(base, null, 2)
+    const left = jsonCode(pretty)
+    const right = jsonCode(
+      pretty.replace('"name": "alpha"', '"title": "alpha"'),
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.changedBlocks, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.equal(codeLineCount(result.leftHtml, 'changed'), 1)
+    assert.equal(codeLineCount(result.rightHtml, 'changed'), 1)
+    assert.equal(codeLineCount(result.leftHtml, 'add'), 0)
+    assert.equal(codeLineCount(result.rightHtml, 'add'), 0)
+    assert.equal(codeLineCount(result.leftHtml, 'del'), 0)
+    assert.match(result.leftHtml, /adoc-diff-word-del[^>]*>name</)
+    assert.match(result.rightHtml, /adoc-diff-word-ins[^>]*>title</)
+  })
+
+  test('diffs a changed JSON value and a minified JSON line', () => {
+    const leftObject = { name: 'alpha', version: 1, enabled: true }
+    const rightObject = { name: 'alpha', version: 2, enabled: false }
+    const prettyLeft = jsonCode(JSON.stringify(leftObject, null, 2))
+    const prettyRight = jsonCode(JSON.stringify(rightObject, null, 2))
+    const pretty = diff(prettyLeft, prettyRight)
+    assert.equal(pretty.stats.changes, 1)
+    assert.equal(codeLineCount(pretty.leftHtml, 'changed'), 2)
+    assert.equal(codeLineCount(pretty.rightHtml, 'changed'), 2)
+
+    const minified = diff(
+      jsonCode(JSON.stringify(leftObject)),
+      jsonCode(JSON.stringify(rightObject)),
+    )
+    assert.equal(minified.stats.changes, 1)
+    assert.equal(codeLineCount(minified.leftHtml, 'changed'), 1)
+    assert.equal(codeLineCount(minified.rightHtml, 'changed'), 1)
+    assert.match(minified.leftHtml, /adoc-diff-word-del[^>]*>1</)
+    assert.match(minified.leftHtml, /adoc-diff-word-del[^>]*>true</)
+    assert.match(minified.rightHtml, /adoc-diff-word-ins[^>]*>2</)
+    assert.match(minified.rightHtml, /adoc-diff-word-ins[^>]*>false</)
+  })
+
+  test('shows a JSON string becoming an object as one hunk', () => {
+    const left = jsonCode(
+      JSON.stringify({ name: 'alpha', config: 'simple' }, null, 2),
+    )
+    const right = jsonCode(
+      JSON.stringify(
+        { name: 'alpha', config: { nested: true, mode: 'advanced' } },
+        null,
+        2,
+      ),
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.visualChanges, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.equal(codeLineCount(result.leftHtml, 'changed'), 1)
+    assert.equal(codeGapCount(result.leftHtml, 'add'), 3)
+    assert.equal(codeLineCount(result.rightHtml, 'add'), 3)
+    assert.match(result.leftHtml, /adoc-diff-word-del[^>]*>"simple"</)
+    assert.match(result.rightHtml, /adoc-diff-word-ins[^>]*>\{</)
+  })
+
+  test('shows a JSON object becoming a string as one hunk', () => {
+    const left = jsonCode(
+      JSON.stringify(
+        { name: 'alpha', config: { nested: true, mode: 'advanced' } },
+        null,
+        2,
+      ),
+    )
+    const right = jsonCode(
+      JSON.stringify({ name: 'alpha', config: 'simple' }, null, 2),
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.equal(codeLineCount(result.leftHtml, 'del'), 3)
+    assert.equal(codeGapCount(result.rightHtml, 'del'), 3)
+  })
+
+  test('shows a new JSON object in an array as added lines', () => {
+    const base = { items: [{ id: 1, name: 'first' }] }
+    const left = jsonCode(JSON.stringify(base, null, 2))
+    const right = jsonCode(
+      JSON.stringify(
+        {
+          items: [
+            ...base.items,
+            { id: 2, name: 'second', meta: { active: true } },
+          ],
+        },
+        null,
+        2,
+      ),
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.visualChanges, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.equal(codeLineCount(result.leftHtml, 'add'), 0)
+    assert.equal(codeLineCount(result.rightHtml, 'add'), 7)
+    assert.equal(codeGapCount(result.leftHtml, 'add'), 7)
+  })
+
+  test('keeps a long paragraph paired when one sentence is added', () => {
+    const long =
+      'The service reads the configuration file, validates every option, applies the defaults, and then starts the worker process. '
+    const left = paragraph(2, `${long}It keeps running.`)
+    const right = paragraph(
+      2,
+      `${long}It keeps running. It also reports its status every minute.`,
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.visualChanges, 1)
+    assert.equal(result.stats.changedBlocks, 1)
+    assert.equal(result.stats.addedBlocks, 0)
+    assert.equal(result.stats.removedBlocks, 0)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-block-del/)
+    assert.doesNotMatch(result.rightHtml, /adoc-diff-block-ins/)
+    assert.match(
+      result.rightHtml,
+      /adoc-diff-word-ins[^>]*>It also reports its status every minute\.</,
+    )
+  })
+
+  test('replaces an unrelated long paragraph as a whole block', () => {
+    const left = paragraph(
+      2,
+      'The service reads the configuration file, validates every option, applies the defaults, and then starts the worker process. It keeps running and reports its status.',
+    )
+    const right = paragraph(
+      2,
+      'A completely different paragraph about the weather, the garden, and weekend plans. It shares almost none of the service configuration words.',
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.removedBlocks, 1)
+    assert.equal(result.stats.changedBlocks, 0)
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-word/)
+    assert.doesNotMatch(result.rightHtml, /adoc-diff-word/)
+  })
+
+  test('removes and appends a row in the same table: both placeholders appear', () => {
+    const rightRows = [
+      TABLE_ROWS[0],
+      TABLE_ROWS[2],
+      TABLE_ROWS[3],
+      ['inserted', '9', 'new', 'eve'],
+    ]
+    const result = diff(tableDocument(TABLE_ROWS), tableDocument(rightRows))
+    assert.equal(result.stats.changes, 2)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.removedBlocks, 1)
+    assert.equal(result.stats.changedCells, 0)
+    assert.equal(result.stats.changedTables, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 2)
+    assert.deepEqual(hunkIds(result.leftHtml), hunkIds(result.rightHtml))
+    // The removed beta row is red on the old side; the new side has its gap.
+    assert.match(result.leftHtml, /<tr[^>]*adoc-diff-row-del[^>]*>[\s\S]*beta/)
+    assert.match(
+      result.rightHtml,
+      /<tr[^>]*adoc-diff-row-gap[^>]*data-adoc-diff-row-gap="del"/,
+    )
+    // The appended inserted row is green on the new side; the old side has its gap.
+    assert.match(
+      result.leftHtml,
+      /<tr[^>]*adoc-diff-row-gap[^>]*data-adoc-diff-row-gap="ins"/,
+    )
+    assert.match(
+      result.rightHtml,
+      /<tr[^>]*adoc-diff-row-ins[^>]*>[\s\S]*inserted/,
+    )
+  })
+
+  test('swaps a mixed add/remove table: red and green exchange sides', () => {
+    const oldRows = [
+      TABLE_ROWS[0],
+      TABLE_ROWS[2],
+      TABLE_ROWS[3],
+      ['inserted', '9', 'new', 'eve'],
+    ]
+    const result = diff(tableDocument(oldRows), tableDocument(TABLE_ROWS))
+    assert.equal(result.stats.changes, 2)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.removedBlocks, 1)
+    assert.match(
+      result.leftHtml,
+      /<tr[^>]*adoc-diff-row-del[^>]*>[\s\S]*inserted/,
+    )
+    assert.match(result.rightHtml, /<tr[^>]*adoc-diff-row-ins[^>]*>[\s\S]*beta/)
+    // The placeholders follow the rows: beta is reserved on the left, inserted
+    // on the right.
+    assert.match(
+      result.leftHtml,
+      /<tr[^>]*adoc-diff-row-gap[^>]*data-adoc-diff-row-gap="ins"/,
+    )
+    assert.match(
+      result.rightHtml,
+      /<tr[^>]*adoc-diff-row-gap[^>]*data-adoc-diff-row-gap="del"/,
+    )
+  })
+
+  test('handles several added and removed rows in one table', () => {
+    const epsilon = ['epsilon', '5', 'ready', 'eve']
+    const oldRows = [...TABLE_ROWS, epsilon]
+    const newRows = [
+      ['inserted', '9', 'new', 'ian'],
+      TABLE_ROWS[0],
+      TABLE_ROWS[2],
+      epsilon,
+      ['zeta', '6', 'new', 'zoe'],
+    ]
+    const result = diff(tableDocument(oldRows), tableDocument(newRows))
+    assert.equal(result.stats.changes, 4)
+    assert.equal(result.stats.addedBlocks, 2)
+    assert.equal(result.stats.removedBlocks, 2)
+    assert.equal(result.stats.changedCells, 0)
+    assert.equal(hunkIds(result.leftHtml).length, 4)
+    assert.equal(
+      count(result.leftHtml, /<tr[^>]*class="[^"]*\badoc-diff-row-del\b/g),
+      2,
+    )
+    assert.equal(
+      count(
+        result.leftHtml,
+        /<tr[^>]*class="[^"]*\badoc-diff-row-gap\b[^"]*\badoc-diff-gap-ins\b/g,
+      ),
+      2,
+    )
+    assert.equal(
+      count(result.rightHtml, /<tr[^>]*class="[^"]*\badoc-diff-row-ins\b/g),
+      2,
+    )
+    assert.equal(
+      count(
+        result.rightHtml,
+        /<tr[^>]*class="[^"]*\badoc-diff-row-gap\b[^"]*\badoc-diff-gap-del\b/g,
+      ),
+      2,
     )
   })
 
@@ -535,6 +1422,80 @@ describe('renderDiff with complex documents', () => {
     assert.equal(hunkIds(result.leftHtml).length, 3)
   })
 
+  test('adds a whole section with mixed content as one hunk', () => {
+    const a = section('a', 'Section A', paragraph(2, 'Text A.'), 1)
+    const b = section('b', 'Section B', paragraph(8, 'Text B.'), 7)
+    const added = section(
+      'new',
+      'New section',
+      [
+        paragraph(3, 'Paragraph with some text.'),
+        ulist(listItem('one') + listItem('two')),
+        table({
+          line: 7,
+          rows: [
+            ['A', 'B'],
+            ['1', '2'],
+          ],
+        }),
+        code(['{"x": 1}'], 14),
+      ].join(''),
+      2,
+    )
+    const result = diff(a + b, a + added + b)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.visualChanges, 1)
+    assert.equal(result.stats.addedBlocks, 1)
+    assert.equal(result.stats.removedBlocks, 0)
+    assert.equal(result.stats.changedBlocks, 0)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.match(
+      result.rightHtml,
+      /<div class="sect1[^>]*adoc-diff-block-ins[^>]*>[\s\S]*New section/,
+    )
+  })
+
+  test('removes a whole section as one collapsed hunk', () => {
+    const a = section('a', 'Section A', paragraph(2, 'Text A.'), 1)
+    const b = section('b', 'Section B', paragraph(8, 'Text B.'), 7)
+    const removed = section(
+      'old',
+      'Old section',
+      [
+        paragraph(3, 'First paragraph.'),
+        paragraph(5, 'Second paragraph.'),
+        paragraph(7, 'Third paragraph.'),
+      ].join(''),
+      2,
+    )
+    const result = diff(a + removed + b, a + b)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.addedBlocks, 0)
+    assert.equal(result.stats.removedBlocks, 1)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.match(
+      result.leftHtml,
+      /<div class="sect1[^>]*adoc-diff-block-del[^>]*adoc-diff-collapsed/,
+    )
+    assert.match(result.rightHtml, /data-adoc-diff-gap="del"/)
+    assert.match(result.rightHtml, /data-adoc-diff-gap-object="lines"/)
+  })
+
+  test('renames a section heading without replacing the section', () => {
+    const left = section('a', 'Section A', paragraph(2, 'Text A.'), 1)
+    const right = section('a', 'Section A renamed', paragraph(2, 'Text A.'), 1)
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.changedBlocks, 1)
+    assert.equal(result.stats.addedBlocks, 0)
+    assert.equal(result.stats.removedBlocks, 0)
+    assert.equal(hunkIds(result.leftHtml).length, 1)
+    assert.match(result.leftHtml, /adoc-diff-block-changed[^>]*>Section/)
+    // Only the new title word is a word-level insertion; the old title has no
+    // deleted word, so the left heading gets the change icon instead.
+    assert.match(result.rightHtml, /adoc-diff-word-ins[^>]*>renamed</)
+  })
+
   test('reports reordered sections as moved, not as an addition and a removal', () => {
     const section = (n: number, line: number) =>
       `<div class="sect1 data-line-${line}"><h2 id="_s${n}">Section ${n}</h2><div class="sectionbody"><p>Paragraph ${n} with some words about topic ${n}.</p></div></div>`
@@ -585,5 +1546,32 @@ describe('renderDiff with complex documents', () => {
       /<html[^>]*data-adoc-diff-media-changed/,
     )
     assert.match(result.leftHtml, /adoc-diff-media-changed/)
+  })
+
+  test('marks a changed PlantUML data URI as changed media', () => {
+    const left = image(
+      'data:text/vnd.plantuml;base64,QUxpY2UgLT4gQm9iOiBvbGQ=',
+      'Diagram',
+      5,
+    )
+    const right = image(
+      'data:text/vnd.plantuml;base64,QUxpY2UgLT4gQm9iOiBuZXc=',
+      'Diagram',
+      5,
+    )
+    const result = diff(left, right)
+    assert.equal(result.stats.changes, 1)
+    assert.equal(result.stats.changedBlocks, 1)
+    assert.match(result.leftHtml, /adoc-diff-media-changed/)
+    assert.match(result.rightHtml, /adoc-diff-media-changed/)
+    assert.match(
+      result.leftHtml,
+      /<div class="content[^"]*"[^>]*data-adoc-diff-media-changed/,
+    )
+    assert.match(result.leftHtml, /data-adoc-diff-icon/)
+    // The diagram source is an image resource: the kernel has no text nodes to
+    // word-diff, so only the media marker/icon marks the change.
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-word/)
+    assert.doesNotMatch(result.leftHtml, /adoc-diff-code-line/)
   })
 })

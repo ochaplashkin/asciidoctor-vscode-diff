@@ -305,12 +305,24 @@ export class AlignmentController {
     }
 
     if (typeof MutationObserver !== 'undefined') {
-      this.mutationObserver = new MutationObserver(() => {
+      this.mutationObserver = new MutationObserver((records) => {
         // Our own gap classes/styles change the DOM; ignore those mutations.
-        if (this.aligning || performance.now() - this.lastAlignAt < 200) {
+        if (this.aligning) {
           return
         }
-        this.schedule()
+        // Mermaid and PlantUML replace their `<img>` with an `<svg>` after the
+        // page settles. That changes the diagram height, so the other pane must
+        // reserve a new gap even when the replacement happens just after an
+        // earlier alignment pass. MathJax inserts its SVG the same way.
+        const renderedMedia = records.some((record) =>
+          [...record.addedNodes, ...record.removedNodes].some(
+            isRenderedMediaNode,
+          ),
+        )
+        if (!renderedMedia && performance.now() - this.lastAlignAt < 200) {
+          return
+        }
+        this.schedule(renderedMedia ? 0 : 80)
       })
       for (const pane of [this.leftPane, this.rightPane]) {
         this.mutationObserver.observe(pane, {
@@ -745,6 +757,22 @@ function directColumns(table: HTMLTableElement): HTMLTableColElement[] {
     }
   }
   return columns
+}
+
+function isRenderedMediaNode(node: Node): boolean {
+  if (!(node instanceof Element)) {
+    return false
+  }
+  if (
+    node.matches('svg, .plantuml, .mermaid, img, video, audio, iframe, object')
+  ) {
+    return true
+  }
+  return (
+    node.querySelector(
+      'svg, .plantuml, .mermaid, img, video, audio, iframe, object',
+    ) !== null
+  )
 }
 
 function normalizeKind(value: string): AlignGapKind {

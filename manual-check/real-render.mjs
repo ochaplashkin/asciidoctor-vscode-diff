@@ -63,27 +63,104 @@ function contentType(file) {
   return 'text/plain'
 }
 
+// The test fixtures leave webview resource tokens in the HTML, including the
+// PlantUML engine URLs embedded in a script. Rewrite them to the local HTTP
+// origin so the browser can load the engine; production resolves them through
+// the VS Code webview URI.
+function rewriteWebviewUris(html) {
+  return html.replace(
+    /vscode-asciidoc-resource:\/\/([A-Za-z0-9_-]+)~/g,
+    (match, token) => {
+      const decoded = Buffer.from(
+        token.replace(/-/g, '+').replace(/_/g, '/'),
+        'base64',
+      ).toString('utf8')
+      const pathname = decodeURIComponent(new URL(decoded).pathname)
+      return `${ORIGIN}${pathname.replace(/^\/extension/, '')}`
+    },
+  )
+}
+
+const diagramDoc = (body) => `= Manual
+:toc!:
+
+== Diagrams
+
+${body}
+`
+const uml = (source) => `[plantuml]
+----
+${source}
+----
+`
+const plantumlCases = [
+  {
+    name: 'plantuml-label-change',
+    old: diagramDoc(uml('Alice -> Bob: old message')),
+    new: diagramDoc(uml('Alice -> Bob: new message')),
+  },
+  {
+    name: 'plantuml-add-message',
+    old: diagramDoc(uml('Alice -> Bob: hello')),
+    new: diagramDoc(uml('Alice -> Bob: hello\nBob -> Alice: reply')),
+  },
+  {
+    name: 'plantuml-comment-only',
+    old: diagramDoc(uml('Alice -> Bob: hello')),
+    new: diagramDoc(uml("Alice -> Bob: hello\n' just a comment")),
+  },
+  {
+    name: 'plantuml-whitespace-only',
+    old: diagramDoc(uml('Alice -> Bob: hello')),
+    new: diagramDoc(uml('Alice  ->  Bob:   hello')),
+  },
+  {
+    name: 'plantuml-add',
+    old: diagramDoc('Text before.'),
+    new: diagramDoc(`Text before.\n\n${uml('Alice -> Bob: hello')}`),
+  },
+  {
+    name: 'plantuml-remove',
+    old: diagramDoc(`Text before.\n\n${uml('Alice -> Bob: hello')}`),
+    new: diagramDoc('Text before.'),
+  },
+  {
+    name: 'plantuml-syntax-error',
+    old: diagramDoc(uml('Alice -> Bob: hello')),
+    new: diagramDoc(uml('class {')),
+  },
+]
+
 const browser = await chromium.launch({ channel: 'chrome', headless: true })
-for (const name of ['code-json', 'callouts', 'diagrams']) {
-  const scenario = scenarios.find((item) => item.name === name)
+const cases = [
+  ...['code-json', 'callouts', 'diagrams'].map((name) =>
+    scenarios.find((item) => item.name === name),
+  ),
+  ...plantumlCases,
+]
+const problems = []
+for (const scenario of cases) {
+  const name = scenario.name
   const [left, right] = await Promise.all([convert(scenario.old), convert(scenario.new)])
   const diff = renderDiff(left, right, defaultDiffRenderOptions)
-  const html = buildDiffDocument({
-    leftHtml: diff.leftHtml,
-    rightHtml: diff.rightHtml,
-    diffScriptUri: `${ORIGIN}/diff.js`,
-    diffCssUri: `${ORIGIN}/diff.css`,
-    diffContentCss,
-    leftTitle: 'v1/index.adoc',
-    rightTitle: 'v2/index.adoc',
-    strings,
-    lineMap: diff.lineMap,
-    leftLineCount: diff.leftLineCount,
-    rightLineCount: diff.rightLineCount,
-    version: 1,
-    stats: diff.stats,
-    options: defaultDiffRenderOptions,
-  }).replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/gi, '')
+  const html = rewriteWebviewUris(
+    buildDiffDocument({
+      leftHtml: diff.leftHtml,
+      rightHtml: diff.rightHtml,
+      diffScriptUri: `${ORIGIN}/diff.js`,
+      diffCssUri: `${ORIGIN}/diff.css`,
+      diffContentCss,
+      leftTitle: 'v1/index.adoc',
+      rightTitle: 'v2/index.adoc',
+      strings,
+      lineMap: diff.lineMap,
+      leftLineCount: diff.leftLineCount,
+      rightLineCount: diff.rightLineCount,
+      version: 1,
+      stats: diff.stats,
+      options: defaultDiffRenderOptions,
+    }).replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/gi, ''),
+  )
 
   const page = await browser.newPage({ viewport: { width: 1500, height: 900 } })
   const errors = []
@@ -122,6 +199,20 @@ for (const name of ['code-json', 'callouts', 'diagrams']) {
       mermaidHosted: [...document.querySelectorAll('.mermaid')].filter((diagram) =>
         diagram.closest('[data-adoc-diff-media-changed]'),
       ).length,
+      plantumlDiagrams: document.querySelectorAll('.plantuml').length,
+      plantumlSvgs: document.querySelectorAll('.plantuml svg').length,
+      plantumlMarked: document.querySelectorAll(
+        '.plantuml.adoc-diff-media-changed',
+      ).length,
+      plantumlSvgMarked: document.querySelectorAll(
+        '.plantuml svg.adoc-diff-media-changed',
+      ).length,
+      plantumlHosted: [...document.querySelectorAll('.plantuml')].filter(
+        (diagram) => diagram.closest('[data-adoc-diff-media-changed]'),
+      ).length,
+      plantumlTexts: [...document.querySelectorAll('.plantuml')].map((diagram) =>
+        diagram.textContent.replace(/\s+/g, ' ').trim(),
+      ),
       anchorMax: (() => {
         const left = document.getElementById('diff-left')
         const right = document.getElementById('diff-right')
@@ -137,8 +228,45 @@ for (const name of ['code-json', 'callouts', 'diagrams']) {
       })(),
     }
   })
-  console.log(name, JSON.stringify({ ...metrics, stats: diff.stats, errors }))
+  if (metrics.plantumlDiagrams > 0 && metrics.plantumlSvgs !== metrics.plantumlDiagrams) {
+    problems.push(`${name}: ${metrics.plantumlSvgs}/${metrics.plantumlDiagrams} PlantUML diagrams rendered`)
+  }
+  if (metrics.plantumlErrors > 0) {
+    problems.push(`${name}: ${metrics.plantumlErrors} PlantUML errors`)
+  }
+  const expectedMarked = !['plantuml-add', 'plantuml-remove'].includes(name)
+  if (
+    metrics.plantumlDiagrams > 0 &&
+    expectedMarked &&
+    (metrics.plantumlMarked !== metrics.plantumlDiagrams ||
+      metrics.plantumlHosted !== metrics.plantumlDiagrams ||
+      metrics.plantumlSvgMarked !== metrics.plantumlDiagrams)
+  ) {
+    problems.push(
+      `${name}: PlantUML markers not copied (${metrics.plantumlMarked}/${metrics.plantumlHosted}/${metrics.plantumlSvgMarked})`,
+    )
+  }
+  if (
+    metrics.plantumlDiagrams === 0 &&
+    !['plantuml-add', 'plantuml-remove'].includes(name) &&
+    name.startsWith('plantuml-')
+  ) {
+    problems.push(`${name}: diagram did not render`)
+  }
+  const sameText =
+    metrics.plantumlTexts.length === 2 &&
+    metrics.plantumlTexts[0] === metrics.plantumlTexts[1]
+  console.log(
+    name,
+    JSON.stringify({
+      ...metrics,
+      samePlantumlText: sameText,
+      stats: diff.stats,
+      errors,
+    }),
+  )
   await page.screenshot({ path: `manual-check/screens/real-${name}.png` })
   await page.close()
 }
+console.log(problems.length === 0 ? 'PROBLEMS: 0' : `PROBLEMS:\n${problems.join('\n')}`)
 await browser.close()

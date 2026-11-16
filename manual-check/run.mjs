@@ -65,9 +65,17 @@ const options = { ...defaultDiffRenderOptions }
 await mkdir(path.join('manual-check', 'html'), { recursive: true })
 await mkdir(path.join('manual-check', 'screens'), { recursive: true })
 
-async function convert(text) {
+async function convert(text, style) {
+  const request = previewRequest(text, { attributes: { 'data-uri': '' } })
+  if (style !== undefined) {
+    request.config = {
+      ...request.config,
+      defaultStyle: style,
+      defaultStyleExplicit: true,
+    }
+  }
   const result = await convertForPreview(
-    previewRequest(text, { attributes: { 'data-uri': '' } }),
+    request,
     fakeHost(hostFiles).host,
   )
   return resolveWebviewResources(result.html, result.resources, asTestWebviewUri)
@@ -131,6 +139,23 @@ function problem(scenario, message) {
   console.log(`  PROBLEM ${scenario}: ${message}`)
 }
 
+const tableTints = {
+  green: /^rgba?\(0,\s*128,\s*0\b/,
+  red: /^rgba?\(255,\s*0,\s*0\b/,
+  gray: /^rgba?\(128,\s*128,\s*128\b/,
+}
+
+const tableRowMarkers = {
+  'row-ins': ['adoc-diff-row-ins'],
+  'row-del': ['adoc-diff-row-del'],
+  'gap-ins': ['adoc-diff-row-gap', 'adoc-diff-gap-ins'],
+  'gap-del': ['adoc-diff-row-gap', 'adoc-diff-gap-del'],
+}
+
+function tableCellText(row) {
+  return row.cells.map((cell) => cell.text).join('|')
+}
+
 const browser = await chromium.launch({ channel: 'chrome', headless: true })
 const results = []
 
@@ -139,8 +164,8 @@ for (const scenario of scenarios) {
   if (only !== undefined && only !== '' && scenario.name !== only) continue
   process.stdout.write(`\n=== ${scenario.name}\n`)
   const [oldHtml, newHtml] = await Promise.all([
-    convert(scenario.old),
-    convert(scenario.new),
+    convert(scenario.old, scenario.style),
+    convert(scenario.new, scenario.style),
   ])
   const diff = renderDiff(oldHtml, newHtml, options)
   const leftIds = hunkIds(diff.leftHtml)
@@ -278,6 +303,125 @@ for (const scenario of scenarios) {
         missingTargets.push(id)
       }
     }
+    const tableRows = {}
+    for (const [side, pane] of [
+      ['left', left],
+      ['right', right],
+    ]) {
+      tableRows[side] = [
+        ...pane.querySelectorAll('table.tableblock'),
+      ].map((table) =>
+        [...table.rows].map((row) => ({
+          className: row.className,
+          section: (row.parentElement?.tagName ?? '').toLowerCase(),
+          gap: row.getAttribute('data-adoc-diff-row-gap') ?? '',
+          background: getComputedStyle(row).backgroundColor,
+          cells: [...row.cells].map((cell) => ({
+            tag: (cell.tagName ?? '').toLowerCase(),
+            className: cell.className,
+            background: getComputedStyle(cell).backgroundColor,
+            text: (cell.textContent ?? '').trim(),
+          })),
+        })),
+      )
+    }
+    const tableColumnCounts = {}
+    const listItems = {}
+    for (const [side, pane] of [
+      ['left', left],
+      ['right', right],
+    ]) {
+      tableColumnCounts[side] = [
+        ...pane.querySelectorAll('table.tableblock'),
+      ].map((table) => table.querySelectorAll('colgroup col').length)
+      listItems[side] = [...pane.querySelectorAll('li')].map((item) => {
+        let depth = 0
+        let parent = item.parentElement
+        while (parent) {
+          if (parent.tagName === 'UL' || parent.tagName === 'OL') {
+            depth++
+          }
+          parent = parent.parentElement
+        }
+        const paragraph = [...item.children].find(
+          (child) => child.tagName === 'P',
+        )
+        const list = item.closest('.ulist, .olist, .dlist')
+        return {
+          text: (paragraph?.textContent ?? '').trim(),
+          className: item.className,
+          paragraphClassName: paragraph?.className ?? '',
+          listClassName: list?.className ?? '',
+          hunk: item.getAttribute('data-adoc-diff-hunk') ?? '',
+          background: getComputedStyle(item).backgroundColor,
+          listBackground: list
+            ? getComputedStyle(list).backgroundColor
+            : '',
+          depth,
+        }
+      })
+    }
+    const codeLines = {}
+    const wordTexts = {}
+    const sections = {}
+    for (const [side, pane] of [
+      ['left', left],
+      ['right', right],
+    ]) {
+      sections[side] = [
+        ...pane.querySelectorAll('.sect1, .sect2, .sect3, .sect4'),
+      ].map((section) => {
+        const heading = [...section.children].find((child) =>
+          /^H[1-6]$/.test(child.tagName),
+        )
+        let depth = 1
+        let parent = section.parentElement
+        while (parent) {
+          if (parent.matches('.sect1, .sect2, .sect3, .sect4')) {
+            depth++
+          }
+          parent = parent.parentElement
+        }
+        return {
+          title: (heading?.textContent ?? '').trim(),
+          className: section.className,
+          headingClassName: heading?.className ?? '',
+          hunk: section.getAttribute('data-adoc-diff-hunk') ?? '',
+          collapsed: section.classList.contains('adoc-diff-collapsed'),
+          collapseLines:
+            section.getAttribute('data-adoc-diff-collapse-lines') ?? '',
+          gap: section.getAttribute('data-adoc-diff-gap') ?? '',
+          gapAfter: section.getAttribute('data-adoc-diff-gap-after') ?? '',
+          gapCount: section.getAttribute('data-adoc-diff-gap-count') ?? '',
+          gapObject: section.getAttribute('data-adoc-diff-gap-object') ?? '',
+          depth,
+          text: section.textContent.replace(/\s+/g, ' ').trim().slice(0, 120),
+        }
+      })
+      wordTexts[side] = {
+        del: [...pane.querySelectorAll('.adoc-diff-word-del')].map((el) =>
+          (el.textContent ?? '').trim(),
+        ),
+        ins: [...pane.querySelectorAll('.adoc-diff-word-ins')].map((el) =>
+          (el.textContent ?? '').trim(),
+        ),
+      }
+      codeLines[side] = {
+        changed: pane.querySelectorAll('.adoc-diff-code-line-changed').length,
+        add: pane.querySelectorAll(
+          '.adoc-diff-code-line-add:not(.adoc-diff-code-line-gap)',
+        ).length,
+        del: pane.querySelectorAll(
+          '.adoc-diff-code-line-del:not(.adoc-diff-code-line-gap)',
+        ).length,
+        gap: pane.querySelectorAll('.adoc-diff-code-line-gap').length,
+        wordsDel: pane.querySelectorAll('.adoc-diff-word-del').length,
+        wordsIns: pane.querySelectorAll('.adoc-diff-word-ins').length,
+      }
+    }
+    const cellChanged = document.querySelectorAll(
+      '.adoc-diff-cell-changed',
+    ).length
     return {
       status: status?.textContent,
       className: status?.className,
@@ -286,6 +430,13 @@ for (const scenario of scenarios) {
       maxAnchorDelta: anchorDeltas[0]?.delta ?? 0,
       worstAnchors: anchorDeltas.slice(0, 3),
       grids,
+      tableRows,
+      tableColumnCounts,
+      listItems,
+      codeLines,
+      wordTexts,
+      sections,
+      cellChanged,
       hunkCount: hunkIds.length,
       missingTargets,
       gapLabels: [
@@ -348,13 +499,422 @@ for (const scenario of scenarios) {
     }
   }
 
+  if (scenario.tableChecks !== undefined) {
+    const { table: tableIndex = 0, counts = {}, markers = {} } =
+      scenario.tableChecks
+    for (const [side, expected] of Object.entries(counts)) {
+      const table = (metrics.tableRows[side] ?? [])[tableIndex]
+      const actual = table?.length ?? 0
+      if (actual !== expected) {
+        problem(
+          scenario.name,
+          `${side} table row count ${actual}, expected ${expected}`,
+        )
+      }
+    }
+    for (const [side, checks] of Object.entries(markers)) {
+      const table = (metrics.tableRows[side] ?? [])[tableIndex] ?? []
+      for (const check of checks) {
+        const row = table[check.index]
+        if (row === undefined) {
+          problem(
+            scenario.name,
+            `${side} table has no row ${check.index}`,
+          )
+          continue
+        }
+        const classes = row.className.split(/\s+/).filter(Boolean)
+        const expectedClasses = tableRowMarkers[check.kind]
+        if (expectedClasses === undefined) {
+          problem(
+            scenario.name,
+            `unknown table row kind ${check.kind}`,
+          )
+          continue
+        }
+        for (const className of expectedClasses) {
+          if (!classes.includes(className)) {
+            problem(
+              scenario.name,
+              `${side} row ${check.index} is missing ${className} (${row.className || 'no class'})`,
+            )
+          }
+        }
+        const expectedGap =
+          check.kind === 'gap-ins'
+            ? 'ins'
+            : check.kind === 'gap-del'
+              ? 'del'
+              : ''
+        if (row.gap !== expectedGap) {
+          problem(
+            scenario.name,
+            `${side} row ${check.index} gap ${row.gap || 'none'}, expected ${expectedGap || 'none'}`,
+          )
+        }
+        if (check.section !== undefined && row.section !== check.section) {
+          problem(
+            scenario.name,
+            `${side} row ${check.index} is in ${row.section || 'no section'}, expected ${check.section}`,
+          )
+        }
+        const text = tableCellText(row)
+        if (check.text !== undefined && text !== check.text) {
+          problem(
+            scenario.name,
+            `${side} row ${check.index} text ${JSON.stringify(text)}, expected ${JSON.stringify(check.text)}`,
+          )
+        }
+        const tint = tableTints[check.tint]
+        if (tint === undefined) {
+          problem(scenario.name, `unknown table row tint ${check.tint}`)
+        } else {
+          const colors = [
+            row.background,
+            ...row.cells.map((cell) => cell.background),
+          ]
+          if (!colors.some((color) => tint.test(color))) {
+            problem(
+              scenario.name,
+              `${side} row ${check.index} is not ${check.tint}: ${colors.join(', ')}`,
+            )
+          }
+        }
+      }
+    }
+  }
+
+  if (scenario.columnChecks !== undefined) {
+    const {
+      table: tableIndex = 0,
+      counts = {},
+      cells: cellChecks = {},
+    } = scenario.columnChecks
+    for (const [side, expected] of Object.entries(counts)) {
+      const actual = metrics.tableColumnCounts[side]?.[tableIndex] ?? 0
+      if (actual !== expected) {
+        problem(
+          scenario.name,
+          `${side} table ${tableIndex} column count ${actual}, expected ${expected}`,
+        )
+      }
+    }
+    const columnMarkers = {
+      'gap-ins': ['adoc-diff-col-gap', 'adoc-diff-gap-ins'],
+      'gap-del': ['adoc-diff-col-gap', 'adoc-diff-gap-del'],
+      'cell-ins': ['adoc-diff-cell-ins'],
+      'cell-del': ['adoc-diff-cell-del'],
+    }
+    for (const [side, checks] of Object.entries(cellChecks)) {
+      const table = metrics.tableRows[side]?.[tableIndex] ?? []
+      for (const check of checks) {
+        const row = table[check.row]
+        const cell = row?.cells?.[check.column]
+        if (cell === undefined) {
+          problem(
+            scenario.name,
+            `${side} table ${tableIndex} has no cell ${check.row}:${check.column}`,
+          )
+          continue
+        }
+        const classes = cell.className.split(/\s+/).filter(Boolean)
+        const expectedClasses = columnMarkers[check.kind]
+        if (expectedClasses === undefined) {
+          problem(scenario.name, `unknown column cell kind ${check.kind}`)
+          continue
+        }
+        for (const className of expectedClasses) {
+          if (!classes.includes(className)) {
+            problem(
+              scenario.name,
+              `${side} cell ${check.row}:${check.column} is missing ${className} (${cell.className || 'no class'})`,
+            )
+          }
+        }
+        if (check.tag !== undefined && cell.tag !== check.tag) {
+          problem(
+            scenario.name,
+            `${side} cell ${check.row}:${check.column} is ${cell.tag}, expected ${check.tag}`,
+          )
+        }
+        if (check.text !== undefined && cell.text !== check.text) {
+          problem(
+            scenario.name,
+            `${side} cell ${check.row}:${check.column} text ${JSON.stringify(cell.text)}, expected ${JSON.stringify(check.text)}`,
+          )
+        }
+        const tint = tableTints[check.tint]
+        if (tint === undefined) {
+          problem(scenario.name, `unknown column cell tint ${check.tint}`)
+        } else if (!tint.test(cell.background)) {
+          problem(
+            scenario.name,
+            `${side} cell ${check.row}:${check.column} is not ${check.tint}: ${cell.background}`,
+          )
+        }
+      }
+    }
+  }
+
+  if (scenario.listChecks !== undefined) {
+    const { items: itemChecks = {}, cellChanged } = scenario.listChecks
+    if (
+      cellChanged !== undefined &&
+      (metrics.cellChanged > 0) !== cellChanged
+    ) {
+      problem(
+        scenario.name,
+        `cell-changed marker ${cellChanged ? 'missing' : 'unexpected'} (${metrics.cellChanged})`,
+      )
+    }
+    const listKinds = {
+      ins: ['adoc-diff-block-ins'],
+      del: ['adoc-diff-block-del'],
+      moved: ['adoc-diff-moved'],
+      changed: ['adoc-diff-block-changed'],
+    }
+    for (const [side, checks] of Object.entries(itemChecks)) {
+      const items = metrics.listItems[side] ?? []
+      for (const check of checks) {
+        const item = items.find(
+          (candidate) =>
+            candidate.text === check.text &&
+            (check.depth === undefined || candidate.depth === check.depth),
+        )
+        if (item === undefined) {
+          problem(
+            scenario.name,
+            `${side} has no list item ${JSON.stringify(check.text)} at depth ${check.depth ?? '*'}`,
+          )
+          continue
+        }
+        const expectedClasses = listKinds[check.kind]
+        if (expectedClasses === undefined) {
+          problem(scenario.name, `unknown list item kind ${check.kind}`)
+          continue
+        }
+        const classes =
+          check.kind === 'changed'
+            ? item.paragraphClassName.split(/\s+/).filter(Boolean)
+            : `${item.className} ${item.listClassName}`
+                .split(/\s+/)
+                .filter(Boolean)
+        for (const className of expectedClasses) {
+          if (!classes.includes(className)) {
+            problem(
+              scenario.name,
+              `${side} list item ${JSON.stringify(check.text)} is missing ${className} (${classes.join(' ') || 'no class'})`,
+            )
+          }
+        }
+        if (check.depth !== undefined && item.depth !== check.depth) {
+          problem(
+            scenario.name,
+            `${side} list item ${JSON.stringify(check.text)} is at depth ${item.depth}, expected ${check.depth}`,
+          )
+        }
+        const tint = tableTints[check.tint]
+        if (check.tint !== undefined) {
+          if (tint === undefined) {
+            problem(scenario.name, `unknown list item tint ${check.tint}`)
+          } else if (
+            !tint.test(item.background) &&
+            !tint.test(item.listBackground)
+          ) {
+            problem(
+              scenario.name,
+              `${side} list item ${JSON.stringify(check.text)} is not ${check.tint}: ${item.background} / ${item.listBackground}`,
+            )
+          }
+        }
+      }
+    }
+  }
+
+  if (scenario.codeChecks !== undefined) {
+    for (const [side, expected] of Object.entries(scenario.codeChecks)) {
+      const actual = metrics.codeLines[side]
+      for (const key of [
+        'changed',
+        'add',
+        'del',
+        'gap',
+        'wordsDel',
+        'wordsIns',
+      ]) {
+        if (expected[key] === undefined) {
+          continue
+        }
+        if (actual[key] !== expected[key]) {
+          problem(
+            scenario.name,
+            `${side} code ${key} ${actual[key]}, expected ${expected[key]}`,
+          )
+        }
+      }
+    }
+  }
+
+  if (scenario.textChecks !== undefined) {
+    const {
+      left = {},
+      right = {},
+      stats = {},
+      noChanges = false,
+      nonVisualKinds = [],
+    } = scenario.textChecks
+    if (noChanges && diff.stats.changes !== 0) {
+      problem(
+        scenario.name,
+        `expected no changes, got ${diff.stats.changes}`,
+      )
+    }
+    for (const [key, expected] of Object.entries(stats)) {
+      if (diff.stats[key] !== expected) {
+        problem(
+          scenario.name,
+          `stats.${key}=${diff.stats[key]}, expected ${expected}`,
+        )
+      }
+    }
+    for (const [side, expected] of [
+      ['left', left],
+      ['right', right],
+    ]) {
+      for (const key of ['del', 'ins']) {
+        if (expected[key] === undefined) {
+          continue
+        }
+        const actual = metrics.wordTexts[side][key]
+        if (JSON.stringify(actual) !== JSON.stringify(expected[key])) {
+          problem(
+            scenario.name,
+            `${side} word ${key} ${JSON.stringify(actual)}, expected ${JSON.stringify(expected[key])}`,
+          )
+        }
+      }
+    }
+    if (nonVisualKinds.length > 0) {
+      const actualKinds = metrics.nonVisual.map((entry) => entry[0])
+      if (JSON.stringify(actualKinds) !== JSON.stringify(nonVisualKinds)) {
+        problem(
+          scenario.name,
+          `non-visual kinds ${JSON.stringify(actualKinds)}, expected ${JSON.stringify(nonVisualKinds)}`,
+        )
+      }
+    }
+  }
+
+  if (scenario.sectionChecks !== undefined) {
+    const { stats = {}, left = [], right = [] } = scenario.sectionChecks
+    for (const [key, expected] of Object.entries(stats)) {
+      if (diff.stats[key] !== expected) {
+        problem(
+          scenario.name,
+          `stats.${key}=${diff.stats[key]}, expected ${expected}`,
+        )
+      }
+    }
+    const sectionKinds = {
+      ins: 'adoc-diff-block-ins',
+      del: 'adoc-diff-block-del',
+      moved: 'adoc-diff-moved',
+    }
+    for (const [side, checks] of [
+      ['left', left],
+      ['right', right],
+    ]) {
+      const list = metrics.sections[side]
+      for (const check of checks) {
+        const expectedClass =
+          check.kind === undefined ? undefined : sectionKinds[check.kind]
+        const section = list.find(
+          (candidate) =>
+            candidate.title === check.title &&
+            (check.depth === undefined || candidate.depth === check.depth) &&
+            (expectedClass === undefined ||
+              candidate.className.split(/\s+/).includes(expectedClass)),
+        )
+        if (section === undefined) {
+          problem(
+            scenario.name,
+            `${side} has no section ${JSON.stringify(check.title)}` +
+              (check.kind ? ` with kind ${check.kind}` : '') +
+              (check.depth ? ` at depth ${check.depth}` : ''),
+          )
+          continue
+        }
+        if (
+          check.collapsed !== undefined &&
+          section.collapsed !== check.collapsed
+        ) {
+          problem(
+            scenario.name,
+            `${side} section ${JSON.stringify(check.title)} collapsed=${section.collapsed}, expected ${check.collapsed}`,
+          )
+        }
+        if (
+          check.collapseLines !== undefined &&
+          section.collapseLines !== String(check.collapseLines)
+        ) {
+          problem(
+            scenario.name,
+            `${side} section ${JSON.stringify(check.title)} collapse lines ${section.collapseLines}, expected ${check.collapseLines}`,
+          )
+        }
+        if (
+          check.headingChanged !== undefined &&
+          section.headingClassName
+            .split(/\s+/)
+            .includes('adoc-diff-block-changed') !== check.headingChanged
+        ) {
+          problem(
+            scenario.name,
+            `${side} section ${JSON.stringify(check.title)} heading changed ${section.headingClassName || 'no'}, expected ${check.headingChanged}`,
+          )
+        }
+        if (check.gap !== undefined) {
+          const actualGap = section.gap || section.gapAfter
+          if (actualGap !== check.gap) {
+            problem(
+              scenario.name,
+              `${side} section ${JSON.stringify(check.title)} gap ${actualGap || 'none'}, expected ${check.gap}`,
+            )
+          }
+        }
+        if (
+          check.gapCount !== undefined &&
+          section.gapCount !== String(check.gapCount)
+        ) {
+          problem(
+            scenario.name,
+            `${side} section ${JSON.stringify(check.title)} gap count ${section.gapCount}, expected ${check.gapCount}`,
+          )
+        }
+        if (
+          check.gapObject !== undefined &&
+          section.gapObject !== check.gapObject
+        ) {
+          problem(
+            scenario.name,
+            `${side} section ${JSON.stringify(check.title)} gap object ${section.gapObject || 'none'}, expected ${check.gapObject}`,
+          )
+        }
+      }
+    }
+  }
+
   // Navigate through all hunks and record the status text.
   const navigation = await page.evaluate(async () => {
     const status = document.getElementById('diff-status')
     const seen = []
-    const total = Number(
-      (status.textContent ?? '').split('/')[1]?.trim() ?? 0,
-    )
+    // A non-visual-only diff shows "No visual text differences — N changes"
+    // instead of an `i / N` counter, so read the hunk count from the DOM.
+    const total = new Set(
+      [...document.querySelectorAll('[data-adoc-diff-hunk]')].map((el) =>
+        el.getAttribute('data-adoc-diff-hunk'),
+      ),
+    ).size
     for (let index = 0; index < total; index++) {
       status.click()
       await new Promise((resolve) => setTimeout(resolve, 90))

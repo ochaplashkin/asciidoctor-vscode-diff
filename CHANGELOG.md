@@ -3,6 +3,23 @@
 > This fork starts its own versioning at 1.0.0. The entries that follow this section are
 > inherited from the upstream [AsciiDoc extension](https://github.com/asciidoctor/asciidoctor-vscode).
 
+## Unreleased
+
+### Improvements
+
+* Remove the thin red/green frame around a structurally changed table. The changed rows and columns, their neutral placeholders and the change navigator already identify the change, so the frame around the whole table was redundant
+
+### Bug fixes
+
+* Keep the green/red highlight on an inserted or removed table row when it lands on a zebra-striped row or a shaded header/footer cell. The preview stylesheet shades those rows and cells itself, and its more specific rule overrode the highlight, so every other changed row looked unchanged even though the comparison counted it. The row highlight now also paints the cells with a selector that outranks the preview's table rules, including for header and footer rows
+* Keep a table placeholder in the right row group: a header row added to a table without one now creates a `thead` before the body, and a body row inserted just before a footer stays in the `tbody` instead of moving into the `tfoot` and picking up the footer styling
+* Count a change inside a nested table once: a changed row or cell in a table inside another table's cell no longer marks the surrounding cell as changed, adds a second outer hunk, or counts the outer table. The outer cell is still marked when its own text or attributes change outside the nested table
+* Report a replaced or shifted column as one visible table hunk even when the column count stays the same. Previously the table found no visual hunk, fell through to the non-visual comparison, and reported a formatting change per cell under "No visual text differences"
+* Keep column placeholders, added/removed column cells and changed cells readable in a table header or footer: the preview's own header/footer fill no longer hides the gray gap, the green/red cell highlight or the neutral changed-cell tint
+* Count a change inside a nested list once: an added, removed or moved list item inside a table cell no longer also marks the surrounding cell and adds a second outer row hunk. A list item text change still uses the cell/row hunk because it has no inner hunk of its own
+* Keep a long paragraph paired when only a word or sentence changes. Paragraphs longer than the positional-pairing limit were skipped by the similarity pass as well, so a small edit painted the whole paragraph as removed and added instead of marking the changed words
+* Re-align the two panes after a Mermaid, PlantUML or MathJax image is replaced by its rendered SVG. The replacement changes the block height after the earlier alignment pass, so a changed or added diagram left the surrounding content misaligned by the height difference until the next resize
+
 ## 1.1.0 (2026-11-13)
 
 ### Improvements
