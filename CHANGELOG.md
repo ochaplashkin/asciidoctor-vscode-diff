@@ -5,6 +5,8 @@
 
 ## Unreleased
 
+## 1.1.1 (2026-11-17)
+
 ### Improvements
 
 * Remove the thin red/green frame around a structurally changed table. The changed rows and columns, their neutral placeholders and the change navigator already identify the change, so the frame around the whole table was redundant
