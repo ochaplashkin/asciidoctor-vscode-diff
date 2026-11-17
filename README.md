@@ -59,8 +59,14 @@ Marketplace page:
 3. Use **Swap** in the comparison header to reverse the sides.
 
 You can also open an AsciiDoc file and run **AsciiDoc: Compare AsciiDoc Files** from the
-Command Palette, then pick the second file. To clear a selection, click the status bar
-entry or choose **AsciiDoc → Clear Comparison Selection**.
+Command Palette, then pick the second file. The selected file is marked with a blue
+`⇄` badge in the Explorer and mirrored in a highlighted status bar entry. To clear a
+selection, click the status bar entry or choose **AsciiDoc → Clear Comparison Selection**.
+
+By default the selection is cleared when the comparison panel closes. Set
+`asciidoc.diff.preserveSelection` to `both` to keep both compared files selected: both
+keep their `⇄` badge, and running **Compare** on either of them reopens the same pair.
+Use `first` or `second` to keep only the old (left) or the new (right) file.
 
 The repository contains a complex pair for manual testing,
 [`examples/diff-complex/v1/index.adoc`](examples/diff-complex/v1/index.adoc) and
@@ -76,6 +82,7 @@ edits, an image change, a removed long section and formatting/link/anchor differ
 | `asciidoc.diff.deletedBlocks` | `collapse` | Collapse long deleted blocks into a `−N` strip, or keep them expanded. |
 | `asciidoc.diff.codeBlocks` | `line` | Compare code blocks line by line or as a whole block. |
 | `asciidoc.diff.collapseLines` | `5` | Threshold for collapsing a deleted block. |
+| `asciidoc.diff.preserveSelection` | `none` | Which compared files stay selected after the panel closes: `none`, `both`, `first` (old/left) or `second` (new/right). |
 | `asciidoc.diff.showStats` | `true` | Show the color legend. The change navigator is always available, and the detailed `+added −removed ~changed` numbers are in its tooltip. |
 
 ## What comes from upstream

@@ -5,6 +5,16 @@
 
 ## Unreleased
 
+## 1.1.2 (2026-11-17)
+
+### Features
+
+* Keep the files of a comparison selected after its panel is closed, controlled by the new `asciidoc.diff.preserveSelection` setting: `both` keeps both files selected and reopens the same pair from **Compare** on either of them, `first`/`second` keep only the old (left) or the new (right) file, and `none` (the default) clears the selection as before
+
+### Improvements
+
+* Make the comparison selection easier to spot in the status bar: the entry now uses the prominent status bar colors.
+
 ## 1.1.1 (2026-11-17)
 
 ### Improvements

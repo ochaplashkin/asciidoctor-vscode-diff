@@ -2,7 +2,7 @@
   "name": "asciidoc-vscode-diff",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "publisher": "adoc-diff",
   "author": "Oleg Chaplashkin <olegchaplashkin@gmail.com>",
   "contributors": [
@@ -905,6 +905,24 @@
             "minimum": 1,
             "markdownDescription": "%asciidoc.diff.collapseLines.desc%",
             "scope": "resource"
+          },
+          "asciidoc.diff.preserveSelection": {
+            "type": "string",
+            "default": "none",
+            "enum": [
+              "none",
+              "both",
+              "first",
+              "second"
+            ],
+            "enumDescriptions": [
+              "%asciidoc.diff.preserveSelection.none%",
+              "%asciidoc.diff.preserveSelection.both%",
+              "%asciidoc.diff.preserveSelection.first%",
+              "%asciidoc.diff.preserveSelection.second%"
+            ],
+            "markdownDescription": "%asciidoc.diff.preserveSelection.desc%",
+            "scope": "window"
           },
           "asciidoc.diff.showStats": {
             "type": "boolean",

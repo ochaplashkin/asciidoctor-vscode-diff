@@ -28,6 +28,7 @@ import { AsciidocCompletionProviders } from './features/completion/completionPro
 import { CompareSelection } from './features/diff/compareSelection.js'
 import { AsciidocDiffContentProvider } from './features/diff/diffContentProvider.js'
 import { AsciidocDiffManager } from './features/diff/diffManager.js'
+import { getPreserveSelectionMode } from './features/diff/preserveSelection.js'
 import LinkProvider from './features/documentLinkProvider.js'
 import AdocDocumentSymbolProvider from './features/documentSymbolProvider.js'
 import {
@@ -140,6 +141,15 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(diffManager)
   const compareSelection = new CompareSelection()
   context.subscriptions.push(compareSelection)
+  context.subscriptions.push(
+    diffManager.onDidCloseComparison(({ left, right }) => {
+      compareSelection.restoreAfterComparison(
+        left,
+        right,
+        getPreserveSelectionMode(),
+      )
+    }),
+  )
   context.subscriptions.push(new AsciidocCompletionProviders(asciidocLoader))
   const antoraSupportManager = AntoraSupportManager.getInstance(
     context.workspaceState,

@@ -24,13 +24,25 @@ export class AsciidocDiffManager implements vscode.WebviewPanelSerializer {
   private renderTimer: ReturnType<typeof setTimeout> | undefined
   /** A render was requested while the panel was hidden. */
   private dirty = false
+  /** Suppresses the close event while the extension itself is shutting down. */
+  private suppressCloseEvent = false
   private readonly disposables: vscode.Disposable[] = []
+  private readonly _onDidCloseComparison = new vscode.EventEmitter<{
+    readonly left: vscode.Uri
+    readonly right: vscode.Uri
+  }>()
+  /**
+   * Fires when the comparison panel is closed, before the pair is forgotten.
+   * The selection restoration listens to it.
+   */
+  public readonly onDidCloseComparison = this._onDidCloseComparison.event
 
   constructor(
     private readonly contentProvider: AsciidocDiffContentProvider,
     private readonly contributionProvider: AsciidocContributionProvider,
     private readonly logger: Logger,
   ) {
+    this.disposables.push(this._onDidCloseComparison)
     this.disposables.push(
       vscode.window.registerWebviewPanelSerializer(
         AsciidocDiffPanel.viewType,
@@ -122,8 +134,12 @@ export class AsciidocDiffManager implements vscode.WebviewPanelSerializer {
     session: AsciidocDiffSession,
   ): void {
     panel.onDispose(() => {
+      const pair = { left: panel.leftUri, right: panel.rightUri }
       this.panel = undefined
       this.session = undefined
+      if (!this.suppressCloseEvent) {
+        this._onDidCloseComparison.fire(pair)
+      }
     })
     panel.onDidRequestSwap(() => {
       this.swap().then()
@@ -198,14 +214,17 @@ export class AsciidocDiffManager implements vscode.WebviewPanelSerializer {
   }
 
   public dispose(): void {
+    // Closing the panel here is a shutdown, not a user action: it must not
+    // restore the comparison selection.
+    this.suppressCloseEvent = true
     if (this.renderTimer) {
       clearTimeout(this.renderTimer)
       this.renderTimer = undefined
     }
-    disposeAll(this.disposables)
     this.panel?.dispose()
     this.panel = undefined
     this.session = undefined
+    disposeAll(this.disposables)
   }
 
   private isActiveDocument(uri: vscode.Uri): boolean {

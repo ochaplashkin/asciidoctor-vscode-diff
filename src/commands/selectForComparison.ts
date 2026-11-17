@@ -4,8 +4,8 @@ import { CompareSelection } from '../features/diff/compareSelection.js'
 
 /**
  * Remembers the clicked (or active) file as the first side of the next
- * comparison. Selecting another file replaces the previous choice, which is how
- * the user re-selects the first file.
+ * comparison. Selecting another file replaces the previous choice, including a
+ * pair kept after a previous comparison, which is how the user starts over.
  */
 export class SelectForComparisonCommand implements Command {
   public readonly id = 'asciidoc.selectForComparison'
