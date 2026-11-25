@@ -6,6 +6,10 @@ export { CompareWithSelectedCommand } from './compareWithSelected.js'
 export { ExportAsPDF } from './exportAsPDF.js'
 export { MoveCursorToPositionCommand } from './moveCursorToPosition.js'
 export { OpenDocumentLinkCommand } from './openDocumentLink.js'
+export {
+  DisableOpenInPreviewCommand,
+  EnableOpenInPreviewCommand,
+} from './openInPreview.js'
 export { PasteImage } from './pasteImage.js'
 export { RefreshPreviewCommand } from './refreshPreview.js'
 export { SaveDocbook } from './saveDocbook.js'
@@ -27,3 +31,4 @@ export {
   ToggleMonospaceCommand,
 } from './toggleFormatting.js'
 export { ToggleLockCommand } from './toggleLock.js'
+export { ViewSourceCommand } from './viewSource.js'

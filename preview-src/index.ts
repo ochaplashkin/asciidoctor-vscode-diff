@@ -15,7 +15,9 @@ import {
   suppressScrollEcho,
 } from './scroll-sync.js'
 import { getData, getSettings } from './settings.js'
+import { installSourceButton } from './source-button.js'
 import { getInitialPreviewState } from './state.js'
+import { getStrings } from './strings.js'
 import {
   holdViewport,
   previewEnvironment,
@@ -43,6 +45,12 @@ const state = getInitialPreviewState(
 vscode.setState(state)
 
 const messaging = createPosterForVsCode(vscode)
+
+// Preview-first mode: offer a way back to the source from the rendered page.
+// The bar is outside `#preview-root`, so incremental content updates keep it.
+if (settings.showSourceButton) {
+  installSourceButton(messaging, getStrings().viewSourceCode)
+}
 
 window.cspAlerter.setPoster(messaging)
 window.styleLoadingMonitor.setPoster(messaging)

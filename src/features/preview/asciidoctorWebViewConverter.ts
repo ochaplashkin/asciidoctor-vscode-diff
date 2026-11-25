@@ -119,6 +119,8 @@ export interface PreviewStrings {
     readonly cspAlertMessageTitle: string
     readonly cspAlertMessageLabel: string
     readonly staleImageTitle: string
+    /** Label of the in-page action that opens the source document. */
+    readonly viewSourceCode: string
   }
   readonly plantUml: PlantUmlStrings
 }
@@ -360,6 +362,11 @@ export class AsciidoctorWebViewConverter {
       scrollEditorWithPreview: this.config.scrollEditorWithPreview,
       doubleClickToSwitchToEditor: this.config.doubleClickToSwitchToEditor,
       preservePreviewWhenHidden: this.config.preservePreviewWhenHidden,
+      // Whether the preview renders its in-page "View Source Code" action.
+      // The button is created by the preview client (`preview-src`), not by the
+      // converter, so it never appears in the diff document (which drops the
+      // preview client scripts).
+      showSourceButton: this.config.openInPreview,
       disableSecurityWarnings: options.disableSecurityWarnings,
       // Verbose preview-console diagnostics follow the *Asciidoctor* output
       // channel level (raised via "Developer: Set Log Level…"), not a dedicated

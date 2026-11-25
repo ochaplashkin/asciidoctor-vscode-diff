@@ -9,6 +9,8 @@ export interface PreviewSettings {
   disableSecurityWarnings: boolean
   doubleClickToSwitchToEditor: boolean
   preservePreviewWhenHidden: boolean
+  // Whether to render the in-page "View Source Code" action.
+  showSourceButton?: boolean
   debug: boolean
 }
 

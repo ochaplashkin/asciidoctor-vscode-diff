@@ -32,6 +32,12 @@ node manual-check/interactions.mjs
 # PlantUML source changes (label/message, comment-only, whitespace-only,
 # add/remove, syntax error) and fails if the engine or the pane alignment breaks.
 node manual-check/real-render.mjs
+
+# Browser check of the preview-first mode: renders a document with
+# `asciidoc.preview.openInPreview`, runs the real preview client, verifies the
+# in-page "View Source Code" action and writes screenshots of three designs
+# (top bar, floating pill, text link). Needs Google Chrome.
+node manual-check/source-button.mjs
 ```
 
 Set `SCENARIO=<name>` for a single scenario in `run.mjs`, for example:

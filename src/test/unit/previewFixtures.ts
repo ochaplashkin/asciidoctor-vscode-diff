@@ -19,6 +19,7 @@ const config = {
   scrollPreviewWithEditor: true,
   markEditorSelection: true,
   preservePreviewWhenHidden: false,
+  openInPreview: false,
   lineHeight: Number.NaN,
   fontSize: Number.NaN,
   fontFamily: undefined,
@@ -63,6 +64,7 @@ export function previewRequest(
         cspAlertMessageTitle: 'title',
         cspAlertMessageLabel: 'label',
         staleImageTitle: 'stale',
+        viewSourceCode: 'View Source Code',
       },
       plantUml: {
         alt: 'PlantUML diagram',

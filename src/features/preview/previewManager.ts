@@ -70,6 +70,48 @@ export class AsciidocPreviewManager implements vscode.WebviewPanelSerializer {
     return this._activePreview && this._activePreview.resourceColumn
   }
 
+  /** Actual view column of the active preview, if any. */
+  public get activePreviewColumn(): vscode.ViewColumn | undefined {
+    return this._activePreview && this._activePreview.position
+  }
+
+  /** Whether a preview for `resource` is currently open. */
+  public hasPreviewFor(resource: vscode.Uri): boolean {
+    return this._previews.some((preview) => preview.isPreviewOf(resource))
+  }
+
+  /**
+   * The group where preview-first files are shown, when one is open.
+   *
+   * New files must join that group even if their source tab was opened in
+   * another group (for example, in the source panel to the left of the
+   * previews): otherwise the rendered tabs would be split across groups.
+   */
+  public get previewFirstColumn(): vscode.ViewColumn | undefined {
+    return this._previews.find((preview) => preview.isOwnTab)?.position
+  }
+
+  /**
+   * Reveals and focuses the preview of `resource`, returning its column.
+   *
+   * `ViewSourceCommand` uses this before creating an editor group on the left:
+   * the workbench command that creates it inserts it next to the *active*
+   * group, which must be the preview's group.
+   */
+  public revealPreviewFor(resource: vscode.Uri): vscode.ViewColumn | undefined {
+    const preview = this._previews.find((candidate) =>
+      candidate.isPreviewOf(resource),
+    )
+    if (!preview) {
+      return undefined
+    }
+    const column = preview.position
+    if (column !== undefined) {
+      preview.reveal(column)
+    }
+    return column
+  }
+
   public toggleLock() {
     const preview = this._activePreview
     if (preview) {
@@ -110,6 +152,7 @@ export class AsciidocPreviewManager implements vscode.WebviewPanelSerializer {
         resource,
         previewSettings.previewColumn,
         previewSettings.locked,
+        previewSettings.ownTab === true,
       ),
     )
   }
@@ -123,6 +166,7 @@ export class AsciidocPreviewManager implements vscode.WebviewPanelSerializer {
       previewSettings.resourceColumn,
       previewSettings.previewColumn,
       previewSettings.locked,
+      previewSettings.ownTab === true,
       this._contentProvider,
       this._previewConfigurations,
       this._logger,

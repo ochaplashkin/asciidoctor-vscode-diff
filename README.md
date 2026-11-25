@@ -9,10 +9,10 @@
 > by the Asciidoctor project. It is **not** the official extension and is not affiliated with
 > the Asciidoctor project.
 
-**Only the rendered diff is developed in this fork.** Everything else — syntax
-highlighting, preview, editing helpers, export, diagrams, Antora support, and so on — comes
-from the upstream project and is maintained there. If you only need the base AsciiDoc
-features, use the official extension instead.
+**Only the rendered diff and the optional preview-first mode are developed in this
+fork.** Everything else — syntax highlighting, preview, editing helpers, export, diagrams,
+Antora support, and so on — comes from the upstream project and is maintained there. If you
+only need the base AsciiDoc features, use the official extension instead.
 
 The fork adds a side-by-side comparison of the **rendered output** of two AsciiDoc files:
 old document on the left, new document on the right, with changes highlighted in the
@@ -29,6 +29,11 @@ result rather than in the source text.
 - A **Swap** button to reverse the two sides.
 - Live updates while either document is edited or saved.
 - A small set of `asciidoc.diff.*` settings.
+- An optional preview-first mode: set `asciidoc.preview.openInPreview` to open `.adoc`
+  files as rendered pages, each in its own tab of the same editor group, with a
+  **View Source Code** action at the top of the preview that opens the source to its left.
+  Toggle it from the Explorer context menu (**AsciiDoc → Open Files in Preview Mode**) or
+  from the Settings UI.
 
 Everything else is inherited from upstream. See the
 [upstream documentation](https://docs.asciidoctor.org/vscode-extension/) for the full
@@ -84,6 +89,9 @@ edits, an image change, a removed long section and formatting/link/anchor differ
 | `asciidoc.diff.collapseLines` | `5` | Threshold for collapsing a deleted block. |
 | `asciidoc.diff.preserveSelection` | `none` | Which compared files stay selected after the panel closes: `none`, `both`, `first` (old/left) or `second` (new/right). |
 | `asciidoc.diff.showStats` | `true` | Show the color legend. The change navigator is always available, and the detailed `+added −removed ~changed` numbers are in its tooltip. |
+
+Preview-first mode is controlled by `asciidoc.preview.openInPreview` (default `false`);
+it is not a diff setting.
 
 ## What comes from upstream
 

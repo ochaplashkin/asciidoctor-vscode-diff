@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, test } from 'node:test'
 import { URI } from 'vscode-uri'
+import type { AsciidocPreviewConfiguration } from '../../features/preview/previewConfig.js'
 import {
   convertForPreview,
   resolveWebviewResources,
@@ -72,6 +73,29 @@ describe('convertForPreview', () => {
     await render(previewRequest(':data-uri:\n\nimage::missing.png[]'), host)
     assert.equal(warnings.length, 1)
     assert.match(warnings[0], /missing\.png/)
+  })
+
+  test('passes the preview-first flag to the preview client', async () => {
+    const { host } = fakeHost()
+    const base = previewRequest('= Title\n\nHello')
+    const enabled = {
+      ...base,
+      config: {
+        ...base.config,
+        openInPreview: true,
+      } as unknown as AsciidocPreviewConfiguration,
+    }
+    const { html } = await render(enabled, host)
+    // The setting is read by the preview client, which creates the in-page
+    // "View Source Code" button.
+    assert.ok(html.includes('&quot;showSourceButton&quot;:true'), html)
+    assert.ok(
+      html.includes('&quot;viewSourceCode&quot;:&quot;View Source Code&quot;'),
+      html,
+    )
+
+    const disabled = await render(previewRequest('= Title'), host)
+    assert.ok(disabled.html.includes('&quot;showSourceButton&quot;:false'))
   })
 
   test('prepends the content of .asciidoctorconfig', async () => {

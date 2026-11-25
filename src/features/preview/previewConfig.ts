@@ -34,6 +34,10 @@ export class AsciidocPreviewConfiguration {
   public readonly scrollPreviewWithEditor: boolean
   public readonly markEditorSelection: boolean
   public readonly preservePreviewWhenHidden: boolean
+  // Whether AsciiDoc documents open in the rendered preview instead of the
+  // source editor (see `PreviewOnOpenManager`). The preview also uses it to
+  // decide whether to show its in-page "View Source Code" action.
+  public readonly openInPreview: boolean
 
   public readonly lineHeight: number
   public readonly fontSize: number
@@ -91,6 +95,10 @@ export class AsciidocPreviewConfiguration {
     )
     this.preservePreviewWhenHidden = !!asciidocConfig.get<boolean>(
       'preview.preservePreviewWhenHidden',
+      false,
+    )
+    this.openInPreview = !!asciidocConfig.get<boolean>(
+      'preview.openInPreview',
       false,
     )
 

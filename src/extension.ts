@@ -41,6 +41,7 @@ import {
   PasteImageIntoEditorProvider,
   pasteImageMetadata,
 } from './features/pasteImageIntoEditor.js'
+import { PreviewOnOpenManager } from './features/preview/openInPreview.js'
 import { AsciidocContentProvider } from './features/preview/previewContentProvider.js'
 import { AsciidocPreviewManager } from './features/preview/previewManager.js'
 import { PreviewWorkerClient } from './features/preview/previewWorkerClient.js'
@@ -133,6 +134,8 @@ export async function activate(context: vscode.ExtensionContext) {
     contributionProvider,
   )
   context.subscriptions.push(previewManager)
+  const previewOnOpen = new PreviewOnOpenManager(previewManager, logger)
+  context.subscriptions.push(previewOnOpen)
   const diffManager = new AsciidocDiffManager(
     new AsciidocDiffContentProvider(contentProvider),
     contributionProvider,
@@ -243,6 +246,13 @@ export async function activate(context: vscode.ExtensionContext) {
     new commands.ShowLockedPreviewToSideCommand(previewManager),
   )
   commandManager.register(new commands.ShowSourceCommand(previewManager))
+  commandManager.register(new commands.ViewSourceCommand(previewManager))
+  commandManager.register(
+    new commands.EnableOpenInPreviewCommand(previewOnOpen),
+  )
+  commandManager.register(
+    new commands.DisableOpenInPreviewCommand(previewOnOpen),
+  )
   commandManager.register(new commands.CompareFilesCommand(diffManager))
   commandManager.register(
     new commands.SelectForComparisonCommand(compareSelection),
@@ -366,4 +376,10 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     }),
   )
+
+  // Opening an `.adoc` file activates the extension, and by then VS Code has
+  // already created the source tab: the tab-open listener could not catch that
+  // first file. Preview-first mode redraws the active editor now (a background
+  // restored tab is left as it is).
+  previewOnOpen.redirectActiveEditor()
 }

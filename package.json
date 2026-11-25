@@ -2,7 +2,7 @@
   "name": "asciidoc-vscode-diff",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "publisher": "adoc-diff",
   "author": "Oleg Chaplashkin <olegchaplashkin@gmail.com>",
   "contributors": [
@@ -108,6 +108,24 @@
         "title": "%asciidoc.showSource.title%",
         "category": "AsciiDoc",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "asciidoc.viewSource",
+        "title": "%asciidoc.viewSource.title%",
+        "category": "AsciiDoc",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "asciidoc.enableOpenInPreview",
+        "title": "%asciidoc.enableOpenInPreview.title%",
+        "category": "AsciiDoc",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "asciidoc.disableOpenInPreview",
+        "title": "%asciidoc.disableOpenInPreview.title%",
+        "category": "AsciiDoc",
+        "icon": "$(file-code)"
       },
       {
         "command": "asciidoc.showCheatSheet",
@@ -216,6 +234,11 @@
     "menus": {
       "webview/context": [
         {
+          "command": "asciidoc.viewSource",
+          "when": "webviewId == 'asciidoc.preview' && asciidoc.preview.openInPreview",
+          "group": "navigation"
+        },
+        {
           "command": "asciidoc.saveHTML",
           "when": "webviewId == 'asciidoc.preview' && !isWeb",
           "group": "1_asciidoc_export@1"
@@ -240,7 +263,12 @@
         },
         {
           "command": "asciidoc.showSource",
-          "when": "asciidocPreviewFocus",
+          "when": "asciidocPreviewFocus && !asciidoc.preview.openInPreview",
+          "group": "navigation"
+        },
+        {
+          "command": "asciidoc.viewSource",
+          "when": "asciidocPreviewFocus && asciidoc.preview.openInPreview",
           "group": "navigation"
         },
         {
@@ -296,6 +324,16 @@
           "command": "asciidoc.clearComparisonSelection",
           "when": "resourceLangId == asciidoc && asciidoc.compare.hasSelection",
           "group": "2_clear@1"
+        },
+        {
+          "command": "asciidoc.enableOpenInPreview",
+          "when": "resourceLangId == asciidoc && !asciidoc.preview.openInPreview",
+          "group": "3_preview@1"
+        },
+        {
+          "command": "asciidoc.disableOpenInPreview",
+          "when": "resourceLangId == asciidoc && asciidoc.preview.openInPreview",
+          "group": "3_preview@1"
         }
       ],
       "editor/title/context": [
@@ -339,8 +377,21 @@
         },
         {
           "command": "asciidoc.showSource",
-          "when": "asciidocPreviewFocus",
+          "when": "asciidocPreviewFocus && !asciidoc.preview.openInPreview",
           "group": "navigation"
+        },
+        {
+          "command": "asciidoc.viewSource",
+          "when": "asciidocPreviewFocus && asciidoc.preview.openInPreview",
+          "group": "navigation"
+        },
+        {
+          "command": "asciidoc.enableOpenInPreview",
+          "when": "!asciidoc.preview.openInPreview"
+        },
+        {
+          "command": "asciidoc.disableOpenInPreview",
+          "when": "asciidoc.preview.openInPreview"
         },
         {
           "command": "asciidoc.showPreviewSecuritySelector",
@@ -630,6 +681,13 @@
             ],
             "order": 14,
             "scope": "resource"
+          },
+          "asciidoc.preview.openInPreview": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "%asciidoc.preview.openInPreview.desc%",
+            "order": 15,
+            "scope": "window"
           },
           "asciidoc.preview.openAsciiDocLinks": {
             "type": "string",
@@ -945,7 +1003,8 @@
       }
     },
     "asciidoc.previewStyles": [
-      "./media/editor-selection.css"
+      "./media/editor-selection.css",
+      "./media/preview-chrome.css"
     ],
     "asciidoc.previewScripts": [
       "./dist/index.js"

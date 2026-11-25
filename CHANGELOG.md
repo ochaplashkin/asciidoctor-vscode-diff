@@ -5,6 +5,10 @@
 
 ## Unreleased
 
+### Features
+
+* Add an optional preview-first mode: enable `asciidoc.preview.openInPreview` (or use **AsciiDoc → Open Files in Preview Mode** in the Explorer context menu) to open AsciiDoc files as rendered pages instead of source editors. Each file gets its own preview tab in the same editor group, so rendered files can be switched through the tabs, and the preview shows a **View Source Code** action at the top that opens the source in an editor group to the left of the rendered page
+
 ## 1.1.2 (2026-11-17)
 
 ### Features

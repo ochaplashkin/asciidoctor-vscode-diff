@@ -33,6 +33,10 @@ export class AsciidocPreview
   public static viewType = 'asciidoc.preview'
 
   private _resource: vscode.Uri
+  // A preview opened in preview-first mode owns its tab: it never follows the
+  // active editor and never replaces another document's preview in the same
+  // group. Several such previews can coexist as tabs of the same group.
+  private readonly _ownTab: boolean
   // Never assigned by either `create()` or `revive()` — the `resourceColumn`
   // parameter `create()` accepts is not threaded into the constructor — so
   // `resourceColumn` below always falls back to its default. Pre-existing;
@@ -100,12 +104,14 @@ export class AsciidocPreview
   ): Promise<AsciidocPreview> {
     const resource = vscode.Uri.parse(state.source)
     const locked = state.locked || false
+    const ownTab = state.ownTab === true
     const line = state.line
 
     const preview = new AsciidocPreview(
       webview,
       resource,
       locked,
+      ownTab,
       contentProvider,
       previewConfigurations,
       logger,
@@ -131,6 +137,7 @@ export class AsciidocPreview
     resourceColumn: vscode.ViewColumn,
     previewColumn: vscode.ViewColumn,
     locked: boolean,
+    ownTab: boolean,
     contentProvider: AsciidocContentProvider,
     previewConfigurations: AsciidocPreviewConfigurationManager,
     logger: Logger,
@@ -143,7 +150,7 @@ export class AsciidocPreview
 
     const webview = vscode.window.createWebviewPanel(
       AsciidocPreview.viewType,
-      AsciidocPreview.getPreviewTitle(resource, locked),
+      AsciidocPreview.getPreviewTitle(resource, locked, ownTab),
       previewColumn,
       {
         enableFindWidget: true,
@@ -160,6 +167,7 @@ export class AsciidocPreview
       webview,
       resource,
       locked,
+      ownTab,
       contentProvider,
       previewConfigurations,
       logger,
@@ -172,6 +180,7 @@ export class AsciidocPreview
     webview: vscode.WebviewPanel,
     resource: vscode.Uri,
     locked: boolean,
+    ownTab: boolean,
     private readonly _contentProvider: AsciidocContentProvider,
     private readonly _previewConfigurations: AsciidocPreviewConfigurationManager,
     private readonly _logger: Logger,
@@ -182,6 +191,7 @@ export class AsciidocPreview
     this._resource = resource
 
     this._locked = locked
+    this._ownTab = ownTab
     this.editor = webview
     this.config = vscode.workspace.getConfiguration('asciidoc', this.resource)
     this.refreshInterval = this.config.get<number>(
@@ -251,6 +261,16 @@ export class AsciidocPreview
 
           case 'clickLink':
             this.onDidClickPreviewLink(e.body.href)
+            break
+
+          case 'showSource':
+            // The in-page "View Source Code" action. It opens the source in a
+            // separate editor group so the rendered page stays visible, unlike
+            // `asciidoc.showSource` (the title-bar toggle).
+            vscode.commands.executeCommand(
+              'asciidoc.viewSource',
+              this._resource,
+            )
             break
 
           case 'showPreviewSecuritySelector':
@@ -323,7 +343,12 @@ export class AsciidocPreview
 
     vscode.window.onDidChangeActiveTextEditor(
       (editor) => {
-        if (editor && isAsciidocFile(editor.document) && !this._locked) {
+        if (
+          editor &&
+          isAsciidocFile(editor.document) &&
+          !this._locked &&
+          !this._ownTab
+        ) {
           // Only follow a switch to a *different* document. The preview is a
           // webview in the editor area, so focusing it clears
           // `activeTextEditor`; merely clicking back into the already-previewed
@@ -361,6 +386,7 @@ export class AsciidocPreview
     return {
       resource: this._resource.toString(),
       locked: this._locked,
+      ownTab: this._ownTab,
       line: this.line,
       imageInfo: this.imageInfo,
     }
@@ -477,8 +503,21 @@ export class AsciidocPreview
     otherResource: vscode.Uri,
     otherPosition: vscode.ViewColumn | undefined,
     otherLocked: boolean,
+    otherOwnTab: boolean,
   ): boolean {
     if (this.position !== otherPosition) {
+      return false
+    }
+
+    // A preview that owns its tab belongs to one document: any request for
+    // that document (preview-first or a manual "Show Preview") reuses it, and
+    // a request for another document never does.
+    if (this._ownTab) {
+      return this.isPreviewOf(otherResource)
+    }
+    // Conversely, a preview-first request must not steal the dynamic preview
+    // of another document: it creates its own tab instead.
+    if (otherOwnTab) {
       return false
     }
 
@@ -494,6 +533,7 @@ export class AsciidocPreview
       otherPreview._resource,
       otherPreview.position,
       otherPreview._locked,
+      otherPreview._ownTab,
     )
   }
 
@@ -506,6 +546,7 @@ export class AsciidocPreview
     this.editor.title = AsciidocPreview.getPreviewTitle(
       this._resource,
       this._locked,
+      this._ownTab,
     )
   }
 
@@ -524,15 +565,23 @@ export class AsciidocPreview
     return this.config.get<boolean>('preview.scrollPreviewWithEditor', true)
   }
 
-  private isPreviewOf(resource: vscode.Uri): boolean {
+  public isPreviewOf(resource: vscode.Uri): boolean {
     return this._resource.fsPath === resource.fsPath
+  }
+
+  /** Whether this preview was opened by preview-first mode (one tab per file). */
+  public get isOwnTab(): boolean {
+    return this._ownTab
   }
 
   private static getPreviewTitle(
     resource: vscode.Uri,
     locked: boolean,
+    ownTab: boolean,
   ): string {
-    return locked
+    // A preview-first tab is named like a normal preview: the bracket of a
+    // locked preview would suggest it is following another document's editor.
+    return locked && !ownTab
       ? l10nT('preview.locked.title', path.basename(resource.fsPath))
       : l10nT('preview.unlocked.title', path.basename(resource.fsPath))
   }
@@ -605,6 +654,7 @@ export class AsciidocPreview
       this.editor.title = AsciidocPreview.getPreviewTitle(
         this._resource,
         this._locked,
+        this._ownTab,
       )
     }
     this.editor.iconPath = this.iconPath
@@ -812,4 +862,9 @@ export interface PreviewSettings {
   readonly resourceColumn: vscode.ViewColumn
   readonly previewColumn: vscode.ViewColumn
   readonly locked: boolean
+  /**
+   * Preview-first mode: give this document its own tab, instead of replacing
+   * the preview of another document in the same editor group.
+   */
+  readonly ownTab?: boolean
 }
